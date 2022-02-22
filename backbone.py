@@ -94,13 +94,3 @@ if __name__ == '__main__':
     layer_sparsifying_masks = EigenNet().get_all_layer_sparsifying_masks(weight_list, 3)
     weight_list = [w*wm for w, wm in zip(weight_list, layer_sparsifying_masks)]
     output = model.apply(variables, (batch, D))
-    print(output.shape)
-    '''
-
-    x = np.linspace(0, 2, 3)
-    y = np.linspace(0, 2, 3)
-    xv, yv = np.meshgrid(x, y, indexing='ij')
-
-    print(xv)
-    print(yv)
-    '''
