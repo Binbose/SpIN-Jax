@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp                # JAX NumPy
 
 from flax import linen as nn           # The Linen API
-from flax.training import train_state  # Useful dataclass to keep train state
+from flax.training import train_state  # Useful dataclass to keep train weight_dict
 
 import numpy as np                     # Ordinary NumPy
 import optax                           # Optimizers
@@ -11,13 +11,13 @@ import matplotlib.pyplot as plt
 from backbone import EigenNet
 from train_spin import create_train_state
 
-def plot_2d_output(model, state, D, n_eigenfunc=0, N=100):
+def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, n_space_dimension=2, N=100):
 
     # generate 2 2d grids for the x & y bounds
     y, x = np.meshgrid(np.linspace(-D, D, N), np.linspace(-D, D, N))
     coordinates = np.stack([x,y], axis=-1).reshape(-1,2)
 
-    z = model.apply(state, (coordinates, D))[:, n_eigenfunc].reshape(N,N)
+    z = model.apply(weight_dict, (coordinates, D))[:, n_eigenfunc].reshape(N, N)
     z_min, z_max = -np.abs(z).max(), np.abs(z).max()
 
     fig, ax = plt.subplots()
@@ -34,12 +34,13 @@ def plot_2d_output(model, state, D, n_eigenfunc=0, N=100):
 if __name__ == '__main__':
     D = 50
     N = 100
+    n_space_dimension = 2
     model = EigenNet()
-    batch = jnp.ones((N**2, 2))
-    variables = model.init(jax.random.PRNGKey(0), (batch, D))
-    weight_list = [variables['params'][key]['kernel'] for key in variables['params'].keys()]
+    batch = jnp.ones((N**2, n_space_dimension))
+    weight_dict = model.init(jax.random.PRNGKey(0), (batch, D))
+    weight_list = [weight_dict['params'][key]['kernel'] for key in weight_dict['params'].keys()]
     layer_sparsifying_masks = EigenNet().get_all_layer_sparsifying_masks(weight_list, 3)
     weight_list = [w*wm for w, wm in zip(weight_list, layer_sparsifying_masks)]
-    output = model.apply(variables, (batch, D))
+    output = model.apply(weight_dict, (batch, D))
 
-    plot_2d_output(EigenNet(), variables, D, n_eigenfunc=0, N=N)
+    plot_2d_output(EigenNet(), weight_dict, D, n_eigenfunc=0, n_space_dimension=n_space_dimension, N=N)

@@ -2,7 +2,8 @@ import jax
 import jax.numpy as jnp                # JAX NumPy
 
 from flax import linen as nn           # The Linen API
-from flax.training import train_state  # Useful dataclass to keep train state
+from flax.training import train_state  # Useful dataclass to keep train weight_dict
+from flax.core import FrozenDict
 
 import numpy as np                     # Ordinary NumPy
 import optax                           # Optimizers
@@ -74,23 +75,28 @@ class EigenNet(nn.Module):
         return layer_sparsifing_mask
 
     @staticmethod
-    def get_all_layer_sparsifying_masks(weight_list, sparsifing_K):
-        L = len(weight_list)
-        return [jax.lax.stop_gradient(EigenNet().get_layer_sparsifying_mask(w, sparsifing_K, l, L)) for l, w in enumerate(weight_list)]
+    def get_all_layer_sparsifying_masks(weight_dict, sparsifing_K):
+        L = len(weight_dict['params'])
+        return [jax.lax.stop_gradient(EigenNet().get_layer_sparsifying_mask(weight_dict['params'][key]['kernel'], sparsifing_K, l, L)) for l, key in enumerate(weight_dict['params'].keys())]
 
+    @staticmethod
+    def sparsify_weights(weight_dict, layer_sparsifying_masks):
+        weight_dict = weight_dict.unfreeze()
+        for key, sparsifying_layer_mask in zip(weight_dict['params'].keys(), layer_sparsifying_masks):
+            weight_dict['params'][key]['kernel'] = weight_dict['params'][key]['kernel'] * sparsifying_layer_mask
 
-
-
+        weight_dict = FrozenDict(weight_dict)
+        return weight_dict
 
 
 
 if __name__ == '__main__':
-
     D = 2
+    sparsifying_K = 3
     model = EigenNet()
     batch = jnp.ones((16, 2))
-    variables = model.init(jax.random.PRNGKey(0), (batch, D))
-    weight_list = [variables['params'][key]['kernel'] for key in variables['params'].keys()]
-    layer_sparsifying_masks = EigenNet().get_all_layer_sparsifying_masks(weight_list, 3)
+    weight_dict = model.init(jax.random.PRNGKey(0), (batch, D))
+    weight_list = [weight_dict['params'][key]['kernel'] for key in weight_dict['params'].keys()]
+    layer_sparsifying_masks = EigenNet().get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
     weight_list = [w*wm for w, wm in zip(weight_list, layer_sparsifying_masks)]
-    output = model.apply(variables, (batch, D))
+    output = model.apply(weight_dict, (batch, D))
