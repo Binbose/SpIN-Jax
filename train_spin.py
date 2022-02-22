@@ -7,7 +7,8 @@ from flax.training import train_state  # Useful dataclass to keep train weight_d
 import numpy as np                     # Ordinary NumPy
 import optax                           # Optimizers
 from backbone import EigenNet
-
+from physics import hamiltonian_operator
+from helper import moving_average
 
 
 def create_train_state(batch_size, D, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
@@ -23,33 +24,25 @@ def create_train_state(batch_size, D, learning_rate, decay_rate, sparsifying_K, 
         apply_fn=model.apply, params=weight_dict, tx=tx), layer_sparsifying_masks
 
 
+def get_network_as_function(params):
+    return lambda x: EigenNet().apply(params, x)
+
 #@jax.jit
-def train_step(state, batch):
-    pred = EigenNet().apply(state.params, batch)
+def train_step(state, batch, sigma_t_bar, pi_t_bar, beta):
+    u = get_network_as_function(state.params)
+    pred = u(batch)
 
     sigma_t_hat = jnp.sum(pred[:,:,None]@pred[:,:,None].swapaxes(2,1), axis=0)
-    pi_t_hat =
+
+    h_u = hamiltonian_operator(u, batch, system='hydrogen')
+    pi_t_hat = jnp.sum(h_u[:,:,None]@pred[:,:,None].swapaxes(2,1), axis=0)
 
 
-    '''
-    def loss_fn(params):
-    pred = EigenNet().apply({'params': params}, batch['cooridnates'])
-    loss = cross_entropy_loss(logits=logits, labels=batch['label'])
-    return loss, logits
-    
-    
-    grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    (_, logits), grads = grad_fn(state.params)
-    state = state.apply_gradients(grads=grads)
-    return state
-'''
+    sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=beta)
+    pi_t_bar = moving_average(pi_t_bar, pi_t_hat, beta=beta)
 
 
-def train_epoch(state, batch):
-
-    state = train_step(state, batch)
-
-    return state, energies
+    state, energies, sigma_t_bar, pi_t_bar
 
 
 
@@ -64,6 +57,7 @@ if __name__ == '__main__':
     # Optimizer
     learning_rate = 1e-5
     decay_rate = 0.999
+    running_average_beta = 0.01
 
     # Train setup
     num_epochs = 10000
@@ -74,13 +68,13 @@ if __name__ == '__main__':
 
     # Create initial state
     state, layer_sparsifying_masks = create_train_state(batch_size, D, learning_rate, decay_rate, sparsifying_K, init_rng=init_rng)
-
+    sigma_t_bar, pi_t_bar = jnp.zeros(())
 
 
     for epoch in range(1, num_epochs + 1):
       batch = np.random.uniform(0,1, size=(batch_size, 2))
 
       # Run an optimization step over a training batch
-      state, energies = train_epoch(state, (batch, D))
+      state, energies, sigma_t_bar, pi_t_bar = train_step(state, (batch, D), sigma_t_bar, pi_t_bar, running_average_beta)
       state.params = EigenNet().sparsify_weights(state.params, layer_sparsifying_masks)
 

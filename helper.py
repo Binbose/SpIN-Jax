@@ -1,15 +1,23 @@
 import jax
 import jax.numpy as jnp                # JAX NumPy
 
-from flax import linen as nn           # The Linen API
-from flax.training import train_state  # Useful dataclass to keep train weight_dict
-
 import numpy as np                     # Ordinary NumPy
-import optax                           # Optimizers
-from backbone import EigenNet
 import matplotlib.pyplot as plt
 from backbone import EigenNet
-from train_spin import create_train_state
+from jax import jvp, grad
+
+
+def get_hessian_diagonals(fn, x):
+  return jnp.diag(jax.hessian(fn)(x))
+
+def hvp(f, x, v):
+  return jvp(grad(f), (x,), (v,))[1]
+
+def get_hessian_diagonals_2(fn, x):
+    return hvp(fn, x, jnp.ones_like(x))
+
+def moving_average(running_average, new_data, beta):
+    return running_average - beta*(running_average - new_data)
 
 def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, n_space_dimension=2, N=100):
 

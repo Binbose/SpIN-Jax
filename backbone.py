@@ -6,33 +6,24 @@ from flax.training import train_state  # Useful dataclass to keep train weight_d
 from flax.core import FrozenDict
 
 import numpy as np                     # Ordinary NumPy
-import optax                           # Optimizers
+from typing import Sequence
 
 class EigenNet(nn.Module):
-
-    def setup(self):
-
-        self.dense1 = nn.Dense(128, use_bias=False)
-        self.dense2 = nn.Dense(128, use_bias=False)
-        self.dense3 = nn.Dense(128, use_bias=False)
-        self.dense4 = nn.Dense(9, use_bias=False)
+    features: Sequence[int]
 
 
-
+    @nn.compact
     def __call__(self, x_in):
         x_in, D = x_in
 
-        x = self.dense1(x_in)
-        x = nn.softplus(x)
-        x = self.dense2(x)
-        x = nn.softplus(x)
-        x = self.dense3(x)
-        x = nn.softplus(x)
-        x = self.dense4(x)
+        x = nn.softplus(nn.Dense(self.features[0])(x_in))
+        for feat in self.features[1:-1]:
+            x = nn.softplus(nn.Dense(feat)(x))
+        x = nn.Dense(self.features[-1])(x)
 
-        d = jnp.sqrt(2*D**2 - x_in**2) - D
+        d = jnp.sqrt(2 * D ** 2 - x_in ** 2) - D
         d = jnp.prod(d, axis=-1, keepdims=True)
-        x = x*d
+        x = x * d
 
         return x
 
@@ -93,7 +84,8 @@ class EigenNet(nn.Module):
 if __name__ == '__main__':
     D = 2
     sparsifying_K = 3
-    model = EigenNet()
+    n_eigenfunc = 9
+    model = EigenNet([128,128,128,n_eigenfunc])
     batch = jnp.ones((16, 2))
     weight_dict = model.init(jax.random.PRNGKey(0), (batch, D))
     weight_list = [weight_dict['params'][key]['kernel'] for key in weight_dict['params'].keys()]
