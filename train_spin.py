@@ -25,23 +25,31 @@ def create_train_state(batch_size, D, learning_rate, decay_rate, sparsifying_K, 
 
 #@jax.jit
 def train_step(state, batch):
-  def loss_fn(params):
+    pred = EigenNet().apply(state.params, batch)
+
+    sigma_t_hat = jnp.sum(pred[:,:,None]@pred[:,:,None].swapaxes(2,1), axis=0)
+    pi_t_hat =
+
+
+    '''
+    def loss_fn(params):
     pred = EigenNet().apply({'params': params}, batch['cooridnates'])
     loss = cross_entropy_loss(logits=logits, labels=batch['label'])
     return loss, logits
+    
+    
+    grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
+    (_, logits), grads = grad_fn(state.params)
+    state = state.apply_gradients(grads=grads)
+    return state
+'''
 
 
-  grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-  (_, logits), grads = grad_fn(state.params)
-  state = state.apply_gradients(grads=grads)
-  return state
+def train_epoch(state, batch):
 
+    state = train_step(state, batch)
 
-def train_epoch(state, coordinate_batch):
-
-  state = train_step(state, coordinate_batch)
-
-  return state, energies
+    return state, energies
 
 
 
@@ -70,9 +78,9 @@ if __name__ == '__main__':
 
 
     for epoch in range(1, num_epochs + 1):
-      coordinate_batch = np.random.uniform(0,1, size=(batch_size, 2))
+      batch = np.random.uniform(0,1, size=(batch_size, 2))
 
       # Run an optimization step over a training batch
-      state, energies = train_epoch(state, coordinate_batch)
+      state, energies = train_epoch(state, (batch, D))
       state.params = EigenNet().sparsify_weights(state.params, layer_sparsifying_masks)
 
