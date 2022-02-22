@@ -76,7 +76,7 @@ class EigenNet(nn.Module):
     @staticmethod
     def get_all_layer_sparsifying_masks(weight_list, sparsifing_K):
         L = len(weight_list)
-        return [EigenNet().get_layer_sparsifying_mask(w, sparsifing_K, l, L) for l, w in enumerate(weight_list)]
+        return [jax.lax.stop_gradient(EigenNet().get_layer_sparsifying_mask(w, sparsifing_K, l, L)) for l, w in enumerate(weight_list)]
 
 
 
@@ -88,11 +88,13 @@ if __name__ == '__main__':
 
     D = 2
     model = EigenNet()
-    batch = jnp.ones((3, 2))
+    batch = jnp.ones((16, 2))
     variables = model.init(jax.random.PRNGKey(0), (batch, D))
     weight_list = [variables['params'][key]['kernel'] for key in variables['params'].keys()]
-    print(EigenNet().get_layer_sparsifing_mask(variables['params']['dense1']['kernel'], 2, 4, 4))
+    layer_sparsifying_masks = EigenNet().get_all_layer_sparsifying_masks(weight_list, 3)
+    weight_list = [w*wm for w, wm in zip(weight_list, layer_sparsifying_masks)]
     output = model.apply(variables, (batch, D))
+    print(output.shape)
     '''
 
     x = np.linspace(0, 2, 3)
