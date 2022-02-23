@@ -84,8 +84,8 @@ class EigenNet(nn.Module):
 if __name__ == '__main__':
     D = 2
     sparsifying_K = 3
-    n_eigenfunc = 9
-    model = EigenNet([128,128,128,n_eigenfunc])
+    n_eigenfuncs = 9
+    model = EigenNet([128,128,128,n_eigenfuncs])
     batch = jnp.ones((16, 2))
     weight_dict = model.init(jax.random.PRNGKey(0), (batch, D))
     weight_list = [weight_dict['params'][key]['kernel'] for key in weight_dict['params'].keys()]

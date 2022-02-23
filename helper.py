@@ -42,8 +42,9 @@ def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, n_space_dimension=2, N=
 if __name__ == '__main__':
     D = 50
     N = 100
+    n_eigenfunc = 9
     n_space_dimension = 2
-    model = EigenNet()
+    model = EigenNet([128, 128, 128, n_eigenfunc])
     batch = jnp.ones((N**2, n_space_dimension))
     weight_dict = model.init(jax.random.PRNGKey(0), (batch, D))
     weight_list = [weight_dict['params'][key]['kernel'] for key in weight_dict['params'].keys()]
