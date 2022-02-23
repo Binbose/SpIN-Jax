@@ -15,10 +15,10 @@ class EigenNet(nn.Module):
     @nn.compact
     def __call__(self, x_in):
 
-        x = nn.softplus(nn.Dense(self.features[0])(x_in))
+        x = nn.softplus(nn.Dense(self.features[0], use_bias=False)(x_in))
         for feat in self.features[1:-1]:
-            x = nn.softplus(nn.Dense(feat)(x))
-        x = nn.Dense(self.features[-1])(x)
+            x = nn.softplus(nn.Dense(feat, use_bias=False)(x))
+        x = nn.Dense(self.features[-1], use_bias=False)(x)
 
         d = jnp.sqrt(2 * self.D ** 2 - x_in ** 2) - self.D
         d = jnp.prod(d, axis=-1, keepdims=True)
