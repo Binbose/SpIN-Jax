@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp                # JAX NumPy
+from jax import grad
 
 from flax import linen as nn           # The Linen API
 from flax.training import train_state  # Useful dataclass to keep train weight_dict
@@ -24,28 +25,42 @@ def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_ra
         apply_fn=model.apply, params=weight_dict, tx=tx), layer_sparsifying_masks
 
 
-def get_network_as_function(params):
+def get_network_as_function_of_input(params):
     return lambda x: EigenNet().apply(params, x)
 
+def get_network_as_function_of_weights(batch):
+    return lambda weights: EigenNet().apply(weights, x)
+
 #@jax.jit
-def train_step(state, batch, sigma_t_bar, j_sigma_t_bar, beta):
-    u = get_network_as_function(state.params)
+def train_step(state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
+    u = get_network_as_function_of_input(state.params)
     pred = u(batch)
 
-    sigma_t_hat = jnp.sum(pred[:,:,None]@pred[:,:,None].swapaxes(2,1), axis=0)
+    sigma_t_hat = jnp.mean(pred[:,:,None]@pred[:,:,None].swapaxes(2,1), axis=0)
 
     h_u = hamiltonian_operator(u, batch, system='hydrogen')
-    pi_t_hat = jnp.sum(h_u[:,:,None]@pred[:,:,None].swapaxes(2,1), axis=0)
+    pi_t_hat = jnp.mean(h_u[:,:,None]@pred[:,:,None].swapaxes(2,1), axis=0)
 
-    sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=beta)
+    sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=moving_average_beta)
 
     L = jnp.linalg.cholesky(sigma_t_bar)
     L_inv = jnp.linalg.inv(L)
     L_inv_T = L_inv.T
+    L_diag_inv = jnp.linalg.inv(jnp.diag(L))
 
+    u = get_network_as_function_of_weights(batch)
     del_u_del_weights = grad(u)
 
+    j_pi_t_hat = h_u.T @ L_inv_T @ L_diag_inv @ del_u_del_weights
+    j_pi_t_hat = jnp.mean(j_pi_t_hat, axis=0)
+    Lambda = L_inv @ pi_t_hat @ L_inv_T
+    j_sigma_t_hat = L_inv_T @ jnp.triu(Lambda @ jnp.linalg.inv(jnp.diag(L)))
+    j_sigma_t_hat = jnp.mean(j_sigma_t_hat, axis=0)
+    j_sigma_t_bar = moving_average(j_sigma_t_bar, j_sigma_t_hat, moving_average_beta)
 
+    masked_grad = j_pi_t_hat - j_sigma_t_hat
+
+    state = state.apply_gradients(grads=masked_grad)
 
 
     return state, energies, sigma_t_bar, j_sigma_t_bar
@@ -65,7 +80,7 @@ if __name__ == '__main__':
     # Optimizer
     learning_rate = 1e-5
     decay_rate = 0.999
-    running_average_beta = 0.01
+    moving_average_beta = 0.01
 
     # Train setup
     num_epochs = 10000
@@ -84,6 +99,6 @@ if __name__ == '__main__':
       batch = np.random.uniform(0,1, size=(batch_size, 2))
 
       # Run an optimization step over a training batch
-      state, energies, sigma_t_bar, j_sigma_t_bar = train_step(state, (batch, D), sigma_t_bar, j_sigma_t_bar, running_average_beta)
+      state, energies, sigma_t_bar, j_sigma_t_bar = train_step(state, (batch, D), sigma_t_bar, j_sigma_t_bar, moving_average_beta)
       state.params = EigenNet().sparsify_weights(state.params, layer_sparsifying_masks)
 
