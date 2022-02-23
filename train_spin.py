@@ -13,27 +13,27 @@ from helper import moving_average
 
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
-    model = EigenNet([n_dense_neurons, n_dense_neurons, n_dense_neurons, n_eigenfuncs])
+    model = EigenNet(features=[n_dense_neurons, n_dense_neurons, n_dense_neurons, n_eigenfuncs], D=D)
     batch = jnp.ones((batch_size, n_space_dimension))
-    weight_dict = model.init(init_rng, (batch, D))
-    layer_sparsifying_masks = EigenNet().get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
-    weight_dict = EigenNet().sparsify_weights(weight_dict, layer_sparsifying_masks)
+    weight_dict = model.init(init_rng, batch)
+    layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
+    weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
 
     """Creates initial `TrainState`."""
     tx = optax.rmsprop(learning_rate, decay_rate)
-    return train_state.TrainState.create(
+    return model, train_state.TrainState.create(
         apply_fn=model.apply, params=weight_dict, tx=tx), layer_sparsifying_masks
 
 
-def get_network_as_function_of_input(params):
-    return lambda x: EigenNet().apply(params, x)
+def get_network_as_function_of_input(model, params):
+    return lambda batch: model.apply(params, batch)
 
-def get_network_as_function_of_weights(batch):
-    return lambda weights: EigenNet().apply(weights, x)
+def get_network_as_function_of_weights(model, batch):
+    return lambda weights: model.apply(weights, batch)
 
 #@jax.jit
-def train_step(state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
-    u = get_network_as_function_of_input(state.params)
+def train_step(model, state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
+    u = get_network_as_function_of_input(model, state.params)
     pred = u(batch)
 
     sigma_t_hat = jnp.mean(pred[:,:,None]@pred[:,:,None].swapaxes(2,1), axis=0)
@@ -48,7 +48,7 @@ def train_step(state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
     L_inv_T = L_inv.T
     L_diag_inv = jnp.linalg.inv(jnp.diag(L))
 
-    u = get_network_as_function_of_weights(batch)
+    u = get_network_as_function_of_weights(model, batch)
     del_u_del_weights = grad(u)
 
     j_pi_t_hat = h_u.T @ L_inv_T @ L_diag_inv @ del_u_del_weights
@@ -90,15 +90,15 @@ if __name__ == '__main__':
     D = 50
 
     # Create initial state
-    state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, init_rng=init_rng)
+    model, state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, init_rng=init_rng)
     sigma_t_bar = jnp.eye(n_eigenfuncs)
-    j_sigma_t_bar = jnp.zeros((n_eigenfuncs, n_eigenfuncs))
+    j_sigma_t_bar = jnp.zeros(n_eigenfuncs)
 
 
     for epoch in range(1, num_epochs + 1):
       batch = np.random.uniform(0,1, size=(batch_size, 2))
 
       # Run an optimization step over a training batch
-      state, energies, sigma_t_bar, j_sigma_t_bar = train_step(state, (batch, D), sigma_t_bar, j_sigma_t_bar, moving_average_beta)
-      state.params = EigenNet().sparsify_weights(state.params, layer_sparsifying_masks)
+      state, energies, sigma_t_bar, j_sigma_t_bar = train_step(model, state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
+      state.params = EigenNet.sparsify_weights(state.params, layer_sparsifying_masks)
 
