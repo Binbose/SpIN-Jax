@@ -10,18 +10,17 @@ from typing import Sequence
 
 class EigenNet(nn.Module):
     features: Sequence[int]
-
+    D: int
 
     @nn.compact
     def __call__(self, x_in):
-        x_in, D = x_in
 
         x = nn.softplus(nn.Dense(self.features[0])(x_in))
         for feat in self.features[1:-1]:
             x = nn.softplus(nn.Dense(feat)(x))
         x = nn.Dense(self.features[-1])(x)
 
-        d = jnp.sqrt(2 * D ** 2 - x_in ** 2) - D
+        d = jnp.sqrt(2 * self.D ** 2 - x_in ** 2) - self.D
         d = jnp.prod(d, axis=-1, keepdims=True)
         x = x * d
 
@@ -68,7 +67,7 @@ class EigenNet(nn.Module):
     @staticmethod
     def get_all_layer_sparsifying_masks(weight_dict, sparsifing_K):
         L = len(weight_dict['params'])
-        return [jax.lax.stop_gradient(EigenNet().get_layer_sparsifying_mask(weight_dict['params'][key]['kernel'], sparsifing_K, l, L)) for l, key in enumerate(weight_dict['params'].keys())]
+        return [jax.lax.stop_gradient(EigenNet.get_layer_sparsifying_mask(weight_dict['params'][key]['kernel'], sparsifing_K, l, L)) for l, key in enumerate(weight_dict['params'].keys())]
 
     @staticmethod
     def sparsify_weights(weight_dict, layer_sparsifying_masks):
@@ -82,13 +81,13 @@ class EigenNet(nn.Module):
 
 
 if __name__ == '__main__':
-    D = 2
+    D = 50
     sparsifying_K = 3
     n_eigenfuncs = 9
-    model = EigenNet([128,128,128,n_eigenfuncs])
+    model = EigenNet(features=[128,128,128,n_eigenfuncs], D=D)
     batch = jnp.ones((16, 2))
-    weight_dict = model.init(jax.random.PRNGKey(0), (batch, D))
+    weight_dict = model.init(jax.random.PRNGKey(0), batch)
     weight_list = [weight_dict['params'][key]['kernel'] for key in weight_dict['params'].keys()]
-    layer_sparsifying_masks = EigenNet().get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
-    weight_list = [w*wm for w, wm in zip(weight_list, layer_sparsifying_masks)]
-    output = model.apply(weight_dict, (batch, D))
+    layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
+    weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
+    output = model.apply(weight_dict, batch)
