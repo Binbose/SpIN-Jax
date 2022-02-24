@@ -62,8 +62,7 @@ def train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t
     A_2 = L_inv_T @ jnp.triu(Lambda @ L_diag_inv)
     A_2 = pred @ A_2
 
-    '''
-    del_u_del_weights = del_u_del_weights.unfreeze()
+
     for key in del_u_del_weights['params'].keys():
         j_pi_t_hat = jnp.einsum('bj, bjcw -> bcw', A_1,  del_u_del_weights['params'][key]['kernel'])
         j_pi_t_hat = jnp.mean(j_pi_t_hat, axis=0)
@@ -74,9 +73,8 @@ def train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t
         j_sigma_t_bar[key] = moving_average(j_sigma_t_bar[key], j_sigma_t_hat, moving_average_beta)
 
         masked_grad = j_pi_t_hat - j_sigma_t_bar[key]
-
         del_u_del_weights['params'][key]['kernel'] = masked_grad
-    '''
+
     del_u_del_weights = FrozenDict(del_u_del_weights)
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt.update(del_u_del_weights, opt_state)
@@ -125,4 +123,6 @@ if __name__ == '__main__':
       # Run an optimization step over a training batch
       weight_dict, energies, sigma_t_bar, j_sigma_t_bar = train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
       weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
+      weight_dict = weight_dict.unfreeze()
+      print(epoch)
 

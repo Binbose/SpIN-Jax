@@ -13,9 +13,10 @@ def hamiltonian_operator(fn, x, nummerical_diff=True, eps=0.1, system='hydrogen'
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()
 
-    v = v_fn(x)[:,None]
+    fn_x = fn(x)
+    v = v_fn(x)[:,None] * fn_x
     if nummerical_diff:
-        second_derivative = fn(x + eps) + fn(x - eps) - 2 * fn(x)
+        second_derivative = fn(x + eps) + fn(x - eps) - 2 * fn_x
     else:
 
         second_derivative = get_hessian_diagonals(fn, x)
