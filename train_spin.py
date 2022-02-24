@@ -12,6 +12,7 @@ from backbone import EigenNet
 from physics import hamiltonian_operator
 from helper import moving_average
 import sys
+from flax.core import FrozenDict
 
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
@@ -22,9 +23,9 @@ def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_ra
     weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
 
     """Creates initial `TrainState`."""
-    tx = optax.rmsprop(learning_rate, decay_rate)
-    return model, train_state.TrainState.create(
-        apply_fn=model.apply, params=weight_dict, tx=tx), layer_sparsifying_masks
+    opt = optax.rmsprop(learning_rate, decay_rate)
+    opt_state = opt.init(weight_dict)
+    return model, weight_dict, opt, opt_state, layer_sparsifying_masks
 
 
 def get_network_as_function_of_input(model, params):
@@ -34,8 +35,8 @@ def get_network_as_function_of_weights(model, batch):
     return lambda weights: model.apply(weights, batch)
 
 #@jax.jit
-def train_step(model, state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
-    u = get_network_as_function_of_input(model, state.params)
+def train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
+    u = get_network_as_function_of_input(model, weight_dict)
     pred = u(batch)
 
 
@@ -43,7 +44,6 @@ def train_step(model, state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_b
 
     h_u = hamiltonian_operator(u, batch, system='hydrogen')
     pi_t_hat = jnp.mean(h_u[:,:,None]@pred[:,:,None].swapaxes(2,1), axis=0)
-    h_u = jnp.mean(h_u, axis=0)
 
     sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=moving_average_beta)
 
@@ -53,27 +53,40 @@ def train_step(model, state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_b
     L_diag_inv = jnp.eye(L.shape[0]) * (1/jnp.diag(L))
 
     u = get_network_as_function_of_weights(model, batch)
-    del_u_del_weights = jacrev(u)(state.params)
+    del_u_del_weights = jacrev(u)(weight_dict)
 
+    A_1 = L_inv_T @ L_diag_inv
+    A_1 = h_u @ A_1
 
+    Lambda = L_inv @ pi_t_hat @ L_inv_T
+    A_2 = L_inv_T @ jnp.triu(Lambda @ L_diag_inv)
+    A_2 = pred @ A_2
+
+    '''
+    del_u_del_weights = del_u_del_weights.unfreeze()
     for key in del_u_del_weights['params'].keys():
-        j_pi_t_hat = jnp.einsum('ij, bjcw -> bicw', L_diag_inv,  del_u_del_weights['params'][key]['kernel'])
-        j_pi_t_hat = jnp.einsum('ij, bjcw -> bicw', L_inv_T,  j_pi_t_hat)
-        j_pi_t_hat = jnp.einsum('j, bjcw -> bcw', h_u,  j_pi_t_hat)
+        j_pi_t_hat = jnp.einsum('bj, bjcw -> bcw', A_1,  del_u_del_weights['params'][key]['kernel'])
         j_pi_t_hat = jnp.mean(j_pi_t_hat, axis=0)
 
 
-        Lambda = L_inv @ pi_t_hat @ L_inv_T
-        j_sigma_t_hat = L_inv_T @ jnp.triu(Lambda @ jnp.linalg.inv(jnp.diag(L)))
+        j_sigma_t_hat = jnp.einsum('bj, bjcw -> bcw', A_2,  del_u_del_weights['params'][key]['kernel'])
         j_sigma_t_hat = jnp.mean(j_sigma_t_hat, axis=0)
-        j_sigma_t_bar = moving_average(j_sigma_t_bar, j_sigma_t_hat, moving_average_beta)
+        j_sigma_t_bar[key] = moving_average(j_sigma_t_bar[key], j_sigma_t_hat, moving_average_beta)
 
-    masked_grad = j_pi_t_hat - j_sigma_t_hat
+        masked_grad = j_pi_t_hat - j_sigma_t_bar[key]
 
-    state = state.apply_gradients(grads=masked_grad)
+        del_u_del_weights['params'][key]['kernel'] = masked_grad
+    '''
+    del_u_del_weights = FrozenDict(del_u_del_weights)
+    weight_dict = FrozenDict(weight_dict)
+    updates, opt_state = opt.update(del_u_del_weights, opt_state)
+    weight_dict = optax.apply_updates(weight_dict, updates)
+
+    # TODO how do we get the energies?
+    energies=0
 
 
-    return state, energies, sigma_t_bar, j_sigma_t_bar
+    return weight_dict, energies, sigma_t_bar, j_sigma_t_bar
 
 
 
@@ -100,16 +113,16 @@ if __name__ == '__main__':
     D = 50
 
     # Create initial state
-    model, state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, init_rng=init_rng)
+    model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, init_rng=init_rng)
+    weight_dict = weight_dict.unfreeze()
     sigma_t_bar = jnp.eye(n_eigenfuncs)
-    j_sigma_t_bar = jnp.zeros(n_eigenfuncs)
+    j_sigma_t_bar = {key: jnp.zeros_like(weight_dict['params'][key]['kernel']) for key in weight_dict['params'].keys()}
 
 
     for epoch in range(1, num_epochs + 1):
-      #batch = jnp.random.uniform(-D,D, size=(batch_size, 2))
-      batch = jax.random.uniform(rng, minval=-D, maxval=D, shape=(batch_size,2))
+      batch = jax.random.uniform(rng, minval=-D, maxval=D, shape=(batch_size, 2))
 
       # Run an optimization step over a training batch
-      state, energies, sigma_t_bar, j_sigma_t_bar = train_step(model, state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
-      state.params = EigenNet.sparsify_weights(state.params, layer_sparsifying_masks)
+      weight_dict, energies, sigma_t_bar, j_sigma_t_bar = train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
+      weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
 
