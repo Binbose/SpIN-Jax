@@ -8,22 +8,26 @@ from jax import jvp, grad
 
 
 def get_hessian_diagonals(fn, x):
-  return jnp.diag(jax.hessian(fn)(x))
+    return jnp.diag(jax.hessian(fn)(x))
+
 
 def hvp(f, x, v):
-  return jvp(grad(f), (x,), (v,))[1]
+    return jvp(grad(f), (x,), (v,))[1]
+
 
 def get_hessian_diagonals_2(fn, x):
     return hvp(fn, x, jnp.ones_like(x))
 
+
 def moving_average(running_average, new_data, beta):
     return running_average - beta*(running_average - new_data)
+
 
 def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, n_space_dimension=2, N=100):
 
     # generate 2 2d grids for the x & y bounds
     y, x = np.meshgrid(np.linspace(-D, D, N), np.linspace(-D, D, N))
-    coordinates = np.stack([x,y], axis=-1).reshape(-1,2)
+    coordinates = np.stack([x, y], axis=-1).reshape(-1, 2)
 
     z = model.apply(weight_dict, coordinates)[:, n_eigenfunc].reshape(N, N)
     z_min, z_max = -np.abs(z).max(), np.abs(z).max()
@@ -48,9 +52,13 @@ if __name__ == '__main__':
     model = EigenNet(features=[128, 128, 128, n_eigenfunc], D=D)
     batch = jnp.ones((N**2, n_space_dimension))
     weight_dict = model.init(jax.random.PRNGKey(0), batch)
-    weight_list = [weight_dict['params'][key]['kernel'] for key in weight_dict['params'].keys()]
-    layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
-    weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
+    weight_list = [weight_dict['params'][key]['kernel']
+                   for key in weight_dict['params'].keys()]
+    layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(
+        weight_dict, sparsifying_K)
+    weight_dict = EigenNet.sparsify_weights(
+        weight_dict, layer_sparsifying_masks)
     output = model.apply(weight_dict, batch)
 
-    plot_2d_output(model, weight_dict, D, n_eigenfunc=2, n_space_dimension=n_space_dimension, N=N)
+    plot_2d_output(model, weight_dict, D, n_eigenfunc=2,
+                   n_space_dimension=n_space_dimension, N=N)
