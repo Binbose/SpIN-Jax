@@ -14,7 +14,7 @@ from physics import hamiltonian_operator
 from helper import moving_average
 import sys
 from flax.core import FrozenDict
-
+import time
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
     model = EigenNet(
@@ -40,8 +40,7 @@ def get_network_as_function_of_weights(model, batch):
     return lambda weights: model.apply(weights, batch)
 
 # This jit seems not making any difference
-@jax.jit
-def process_del_u_del_weights(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta):
+def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta):
     sigma_t_hat = jnp.mean(
         pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
 
@@ -81,17 +80,33 @@ def process_del_u_del_weights(del_u_del_weights, pred, h_u, sigma_t_bar, moving_
 
 
 def train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
-    batch_to_output = get_network_as_function_of_input(model, weight_dict)
-    pred = batch_to_output(batch)
-    weight_to_output = get_network_as_function_of_weights(model, batch)
-    del_u_del_weights = jacrev(weight_to_output)(weight_dict)
-    h_u = hamiltonian_operator(batch_to_output, batch, system='hydrogen')
+    t1 = time.time()
+    u_of_x = get_network_as_function_of_input(model, weight_dict)
+    u_of_w = get_network_as_function_of_weights(model, batch)
+    print('Create functions ', time.time() - t1)
 
-    del_u_del_weights = process_del_u_del_weights(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
+    t1 = time.time()
+    pred = u_of_x(batch)
+    print('Single predictions ', time.time() - t1)
+
+    t1 = time.time()
+    del_u_del_weights = jacrev(u_of_w)(weight_dict)
+    print('Create functions ', time.time() - t1)
+
+    t1 = time.time()
+    h_u = hamiltonian_operator(u_of_x, batch, system='hydrogen')
+    print('Hamiltonian ', time.time() - t1)
+    t1 = time.time()
+
+    masked_gradient = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
+    print('Masked gradients ', time.time()-t1)
+    t1 = time.time()
 
     weight_dict = FrozenDict(weight_dict)
-    updates, opt_state = opt.update(del_u_del_weights, opt_state)
+    updates, opt_state = opt.update(masked_gradient, opt_state)
     weight_dict = optax.apply_updates(weight_dict, updates)
+    print('Freeze Dicts ', time.time()-t1)
+    print()
 
     # TODO how do we get the energies?
     energies = 0
@@ -115,7 +130,7 @@ if __name__ == '__main__':
     moving_average_beta = 0.01
 
     # Train setup
-    num_epochs = 10000
+    num_epochs = 100
     batch_size = 100
 
     # Simulation size
@@ -129,6 +144,7 @@ if __name__ == '__main__':
     j_sigma_t_bar = {key: jnp.zeros_like(
         weight_dict['params'][key]['kernel']) for key in weight_dict['params'].keys()}
 
+    t1 = time.time()
     for epoch in range(1, num_epochs + 1):
         batch = jax.random.uniform(
             rng, minval=-D, maxval=D, shape=(batch_size, 2))
@@ -140,3 +156,5 @@ if __name__ == '__main__':
             weight_dict, layer_sparsifying_masks)
         weight_dict = weight_dict.unfreeze()
         print(epoch)
+    print('Time ', time.time()-t1)
+    # 39.507134199142456
