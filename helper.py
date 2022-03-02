@@ -23,13 +23,17 @@ def moving_average(running_average, new_data, beta):
     return running_average - beta*(running_average - new_data)
 
 
-def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, n_space_dimension=2, N=100, save_dir=None):
+def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100, save_dir=None):
 
     # generate 2 2d grids for the x & y bounds
     y, x = np.meshgrid(np.linspace(-D, D, N), np.linspace(-D, D, N))
     coordinates = np.stack([x, y], axis=-1).reshape(-1, 2)
 
-    z = model.apply(weight_dict, coordinates)[:, n_eigenfunc].reshape(N, N)
+    if L_inv is not None:
+        z = model.apply(weight_dict, (coordinates, L_inv))[:, n_eigenfunc].reshape(N, N)
+        print(z)
+    else:
+        z = model.apply(weight_dict, coordinates)[:, n_eigenfunc].reshape(N, N)
     z_min, z_max = -np.abs(z).max(), np.abs(z).max()
 
     fig, ax = plt.subplots()

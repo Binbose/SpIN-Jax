@@ -80,7 +80,7 @@ def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_
         masked_grad = j_pi_t_hat - j_sigma_t_bar[key]
         del_u_del_weights['params'][key]['kernel'] = masked_grad
 
-    return FrozenDict(del_u_del_weights), Lambda
+    return FrozenDict(del_u_del_weights), Lambda, L_inv
 
 
 def train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
@@ -91,15 +91,16 @@ def train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t
     del_u_del_weights = jacrev(u_of_w)(weight_dict)
 
     h_u = hamiltonian_operator(u_of_x, batch, fn_x=pred, system='hydrogen')
-    masked_gradient, Lambda = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
+    masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
 
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt.update(masked_gradient, opt_state)
     weight_dict = optax.apply_updates(weight_dict, updates)
 
+    loss = jnp.trace(Lambda)
     energies = jnp.diag(Lambda)
 
-    return weight_dict, energies, sigma_t_bar, j_sigma_t_bar
+    return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv
 
 
 if __name__ == '__main__':
@@ -135,31 +136,38 @@ if __name__ == '__main__':
     j_sigma_t_bar = {key: jnp.zeros_like(
         weight_dict['params'][key]['kernel']) for key in weight_dict['params'].keys()}
 
+    loss = []
     energies = []
     for epoch in tqdm(range(num_epochs)):
         batch = jax.random.uniform(
             rng, minval=-D, maxval=D, shape=(batch_size, 2))
 
         # Run an optimization step over a training batch
-        weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar = train_step(
+        new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv = train_step(
             model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
 
         weight_dict = EigenNet.sparsify_weights(
             weight_dict, layer_sparsifying_masks)
         weight_dict = weight_dict.unfreeze()
 
+        loss.append(new_loss)
         energies.append(new_energies)
 
         if epoch % 200 == 0:
             for i in range(n_eigenfuncs):
-                helper.plot_2d_output(model, weight_dict, D, n_eigenfunc=i, n_space_dimension=2, N=100, save_dir='./results/{}/eigenfunctions/epoch_{}'.format(system, epoch))
+                helper.plot_2d_output(model, weight_dict, D, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=2, N=100, save_dir='./results/{}/eigenfunctions/epoch_{}'.format(system, epoch))
 
             energies_array = np.array(energies)
-            save_dir = './results/{}/energies/'.format(system)
+            save_dir = './results/{}'.format(system)
             Path(save_dir).mkdir(parents=True, exist_ok=True)
             for i in range(n_eigenfuncs):
                 plt.plot(energies_array[:, i], label='Eigenvalue {}'.format(i))
             plt.savefig('{}/energies'.format(save_dir, save_dir))
+            plt.close()
+
+            save_dir = './results/{}'.format(system)
+            plt.plot(loss)
+            plt.savefig('{}/loss'.format(save_dir))
             plt.close()
 
     plt.legend()

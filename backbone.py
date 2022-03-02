@@ -16,6 +16,10 @@ class EigenNet(nn.Module):
 
     @nn.compact
     def __call__(self, x_in):
+        if type(x_in) == tuple:
+            x_in, L_inv = x_in
+        else:
+            L_inv = None
         x = nn.Dense(self.features[0], use_bias=False)(x_in)
 
         # softplus of x is log(1+exp(x))
@@ -32,6 +36,8 @@ class EigenNet(nn.Module):
         d = jnp.prod(d, axis=-1, keepdims=True)
         x = x * d
 
+        if L_inv is not None:
+            x = jnp.einsum('ij, bj -> bi', L_inv, x)
         return x
 
     @staticmethod
