@@ -1,6 +1,7 @@
 from time import sleep
 import jax
 import jax.numpy as jnp                # JAX NumPy
+import matplotlib.pyplot as plt
 from jax import grad, jacfwd, jacrev
 
 from flax import linen as nn           # The Linen API
@@ -9,12 +10,14 @@ from flax.training import train_state
 
 import numpy as np                     # Ordinary NumPy
 import optax                           # Optimizers
+
+import helper
 from backbone import EigenNet
 from physics import hamiltonian_operator
 from helper import moving_average
-import sys
 from flax.core import FrozenDict
 import time
+from tqdm import tqdm
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
     model = EigenNet(
@@ -76,40 +79,24 @@ def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_
         masked_grad = j_pi_t_hat - j_sigma_t_bar[key]
         del_u_del_weights['params'][key]['kernel'] = masked_grad
 
-    return FrozenDict(del_u_del_weights)
+    return FrozenDict(del_u_del_weights), Lambda
 
 
 def train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
-    t1 = time.time()
     u_of_x = get_network_as_function_of_input(model, weight_dict)
     u_of_w = get_network_as_function_of_weights(model, batch)
-    print('Create functions ', time.time() - t1)
 
-    t1 = time.time()
     pred = u_of_x(batch)
-    print('Single predictions ', time.time() - t1)
-
-    t1 = time.time()
     del_u_del_weights = jacrev(u_of_w)(weight_dict)
-    print('Create functions ', time.time() - t1)
 
-    t1 = time.time()
-    h_u = hamiltonian_operator(u_of_x, batch, system='hydrogen')
-    print('Hamiltonian ', time.time() - t1)
-    t1 = time.time()
-
-    masked_gradient = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
-    print('Masked gradients ', time.time()-t1)
-    t1 = time.time()
+    h_u = hamiltonian_operator(u_of_x, batch, fn_x=pred, system='hydrogen')
+    masked_gradient, Lambda = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
 
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt.update(masked_gradient, opt_state)
     weight_dict = optax.apply_updates(weight_dict, updates)
-    print('Freeze Dicts ', time.time()-t1)
-    print()
 
-    # TODO how do we get the energies?
-    energies = 0
+    energies = jnp.diag(Lambda)
 
     return weight_dict, energies, sigma_t_bar, j_sigma_t_bar
 
@@ -117,6 +104,9 @@ def train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t
 if __name__ == '__main__':
     rng = jax.random.PRNGKey(0)
     rng, init_rng = jax.random.split(rng)
+
+    # Problem definition
+    system = 'hydrogen'
 
     # Hyperparameter
     # Network parameter
@@ -130,8 +120,8 @@ if __name__ == '__main__':
     moving_average_beta = 0.01
 
     # Train setup
-    num_epochs = 100
-    batch_size = 100
+    num_epochs = 2000
+    batch_size = 256
 
     # Simulation size
     D = 50
@@ -144,17 +134,31 @@ if __name__ == '__main__':
     j_sigma_t_bar = {key: jnp.zeros_like(
         weight_dict['params'][key]['kernel']) for key in weight_dict['params'].keys()}
 
-    t1 = time.time()
-    for epoch in range(1, num_epochs + 1):
+    energies = []
+    for epoch in tqdm(range(1, num_epochs + 1)):
         batch = jax.random.uniform(
             rng, minval=-D, maxval=D, shape=(batch_size, 2))
 
         # Run an optimization step over a training batch
-        weight_dict, energies, sigma_t_bar, j_sigma_t_bar = train_step(
+        weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar = train_step(
             model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
+
         weight_dict = EigenNet.sparsify_weights(
             weight_dict, layer_sparsifying_masks)
         weight_dict = weight_dict.unfreeze()
-        print(epoch)
-    print('Time ', time.time()-t1)
-    # 39.507134199142456
+
+        energies.append(new_energies)
+
+        if epoch % 200 == 0:
+            for i in range(n_eigenfuncs):
+                helper.plot_2d_output(model, weight_dict, D, n_eigenfunc=i, n_space_dimension=2, N=100, save_dir='./eigenfunc/{}/epoch_{}'.format(system, epoch))
+
+    energies = np.array(energies)
+
+    for i in range(4):
+        plt.plot(energies[:, i], label='Eigenvalue {}'.format(i))
+
+    plt.legend()
+    plt.show()
+
+

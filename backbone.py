@@ -8,7 +8,7 @@ from flax.core import FrozenDict
 
 import numpy as np                     # Ordinary NumPy
 from typing import Sequence
-
+from flax.linen import jit
 
 class EigenNet(nn.Module):
     features: Sequence[int]
@@ -17,12 +17,15 @@ class EigenNet(nn.Module):
     @nn.compact
     def __call__(self, x_in):
         x = nn.Dense(self.features[0], use_bias=False)(x_in)
+
         # softplus of x is log(1+exp(x))
         x = nn.softplus(x)
+
         for feat in self.features[1:-1]:
             x = nn.Dense(feat, use_bias=False)(x)
             x = nn.softplus(x)
         x = nn.Dense(self.features[-1], use_bias=False)(x)
+
         # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition
         # See page 16th for more information
         d = jnp.sqrt(2 * self.D ** 2 - x_in ** 2) - self.D

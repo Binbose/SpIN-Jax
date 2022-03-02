@@ -5,7 +5,7 @@ import numpy as np                     # Ordinary NumPy
 import matplotlib.pyplot as plt
 from backbone import EigenNet
 from jax import jvp, grad
-
+from pathlib import Path
 
 def get_hessian_diagonals(fn, x):
     return jnp.diag(jax.hessian(fn)(x))
@@ -23,7 +23,7 @@ def moving_average(running_average, new_data, beta):
     return running_average - beta*(running_average - new_data)
 
 
-def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, n_space_dimension=2, N=100):
+def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, n_space_dimension=2, N=100, save_dir=None):
 
     # generate 2 2d grids for the x & y bounds
     y, x = np.meshgrid(np.linspace(-D, D, N), np.linspace(-D, D, N))
@@ -40,7 +40,12 @@ def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, n_space_dimension=2, N=
     ax.axis([x.min(), x.max(), y.min(), y.max()])
     fig.colorbar(c, ax=ax)
 
-    plt.show()
+    if save_dir is None:
+        plt.show()
+    else:
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+        plt.savefig('{}/eigenfunc_{}'.format(save_dir, n_eigenfunc))
+        plt.close()
 
 
 if __name__ == '__main__':
