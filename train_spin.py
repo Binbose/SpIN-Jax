@@ -18,6 +18,7 @@ from helper import moving_average
 from flax.core import FrozenDict
 import time
 from tqdm import tqdm
+from pathlib import Path
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
     model = EigenNet(
@@ -76,7 +77,7 @@ def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_
         j_sigma_t_bar[key] = moving_average(
             j_sigma_t_bar[key], j_sigma_t_hat, moving_average_beta)
 
-        masked_grad = j_pi_t_hat - j_sigma_t_bar[key]
+        masked_grad = -(j_pi_t_hat - j_sigma_t_bar[key])
         del_u_del_weights['params'][key]['kernel'] = masked_grad
 
     return FrozenDict(del_u_del_weights), Lambda
@@ -135,7 +136,7 @@ if __name__ == '__main__':
         weight_dict['params'][key]['kernel']) for key in weight_dict['params'].keys()}
 
     energies = []
-    for epoch in tqdm(range(1, num_epochs + 1)):
+    for epoch in tqdm(range(num_epochs)):
         batch = jax.random.uniform(
             rng, minval=-D, maxval=D, shape=(batch_size, 2))
 
@@ -151,12 +152,15 @@ if __name__ == '__main__':
 
         if epoch % 200 == 0:
             for i in range(n_eigenfuncs):
-                helper.plot_2d_output(model, weight_dict, D, n_eigenfunc=i, n_space_dimension=2, N=100, save_dir='./eigenfunc/{}/epoch_{}'.format(system, epoch))
+                helper.plot_2d_output(model, weight_dict, D, n_eigenfunc=i, n_space_dimension=2, N=100, save_dir='./results/{}/eigenfunctions/epoch_{}'.format(system, epoch))
 
-    energies = np.array(energies)
-
-    for i in range(4):
-        plt.plot(energies[:, i], label='Eigenvalue {}'.format(i))
+            energies_array = np.array(energies)
+            save_dir = './results/{}/energies/'.format(system)
+            Path(save_dir).mkdir(parents=True, exist_ok=True)
+            for i in range(n_eigenfuncs):
+                plt.plot(energies_array[:, i], label='Eigenvalue {}'.format(i))
+            plt.savefig('{}/energies'.format(save_dir, save_dir))
+            plt.close()
 
     plt.legend()
     plt.show()
