@@ -77,7 +77,7 @@ def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_
         j_sigma_t_bar[key] = moving_average(
             j_sigma_t_bar[key], j_sigma_t_hat, moving_average_beta)
 
-        masked_grad = -(j_pi_t_hat - j_sigma_t_bar[key])
+        masked_grad = j_pi_t_hat - j_sigma_t_bar[key]
         del_u_del_weights['params'][key]['kernel'] = masked_grad
 
     return FrozenDict(del_u_del_weights), Lambda
