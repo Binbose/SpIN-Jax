@@ -31,7 +31,7 @@ def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, L_inv=None, n_space_dim
 
     if L_inv is not None:
         z = model.apply(weight_dict, (coordinates, L_inv))[:, n_eigenfunc].reshape(N, N)
-        print(z)
+        print('Min ', jnp.min(z), ' Max ', jnp.max(z))
     else:
         z = model.apply(weight_dict, coordinates)[:, n_eigenfunc].reshape(N, N)
     z_min, z_max = -np.abs(z).max(), np.abs(z).max()

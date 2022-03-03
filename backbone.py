@@ -20,15 +20,15 @@ class EigenNet(nn.Module):
             x_in, L_inv = x_in
         else:
             L_inv = None
-        x = nn.Dense(self.features[0], use_bias=False)(x_in)
+        x = nn.Dense(self.features[0], use_bias=False, kernel_init=jax.nn.initializers.lecun_normal())(x_in)
 
         # softplus of x is log(1+exp(x))
         x = nn.softplus(x)
 
         for feat in self.features[1:-1]:
-            x = nn.Dense(feat, use_bias=False)(x)
+            x = nn.Dense(feat, use_bias=False, kernel_init=jax.nn.initializers.lecun_normal())(x)
             x = nn.softplus(x)
-        x = nn.Dense(self.features[-1], use_bias=False)(x)
+        x = nn.Dense(self.features[-1], use_bias=False, kernel_init=jax.nn.initializers.lecun_normal())(x)
 
         # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition
         # See page 16th for more information

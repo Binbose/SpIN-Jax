@@ -27,8 +27,10 @@ def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_ra
     weight_dict = model.init(init_rng, batch)
     layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(
         weight_dict, sparsifying_K)
+    '''
     weight_dict = EigenNet.sparsify_weights(
         weight_dict, layer_sparsifying_masks)
+    '''
 
     """Creates initial `TrainState`."""
     opt = optax.rmsprop(learning_rate, decay_rate)
@@ -90,7 +92,7 @@ def train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t
     pred = u_of_x(batch)
     del_u_del_weights = jacrev(u_of_w)(weight_dict)
 
-    h_u = hamiltonian_operator(u_of_x, batch, fn_x=pred, system='hydrogen')
+    h_u = hamiltonian_operator(u_of_x, batch, fn_x=pred, system='hydrogen', eps=0.1)
     masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
 
     weight_dict = FrozenDict(weight_dict)
@@ -113,7 +115,7 @@ if __name__ == '__main__':
     # Hyperparameter
     # Network parameter
     sparsifying_K = 3
-    n_dense_neurons = 128
+    n_dense_neurons = 64
     n_eigenfuncs = 9
 
     # Optimizer
@@ -146,9 +148,12 @@ if __name__ == '__main__':
         new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv = train_step(
             model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
 
+        '''
         weight_dict = EigenNet.sparsify_weights(
             weight_dict, layer_sparsifying_masks)
+        '''
         weight_dict = weight_dict.unfreeze()
+
 
         loss.append(new_loss)
         energies.append(new_energies)
@@ -165,9 +170,19 @@ if __name__ == '__main__':
             plt.savefig('{}/energies'.format(save_dir, save_dir))
             plt.close()
 
+            for i in range(n_eigenfuncs):
+                plt.plot(energies_array[-500:, i], label='Eigenvalue {}'.format(i))
+            plt.savefig('{}/energies_newest'.format(save_dir, save_dir))
+            plt.close()
+
             save_dir = './results/{}'.format(system)
             plt.plot(loss)
             plt.savefig('{}/loss'.format(save_dir))
+            plt.close()
+
+            save_dir = './results/{}'.format(system)
+            plt.plot(loss[-500:])
+            plt.savefig('{}/loss_newest'.format(save_dir))
             plt.close()
 
     plt.legend()

@@ -28,8 +28,10 @@ def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system
         differences = 0
         for i in range(x.shape[1]):
             differences += second_difference_along_coordinate(fn, fn_x, x, i, eps)
+        #second_derivative = differences
         second_derivative = differences / eps**2
     else:
         second_derivative = get_hessian_diagonals(fn, x)
 
-    return second_derivative + v
+
+    return -(second_derivative + v)
