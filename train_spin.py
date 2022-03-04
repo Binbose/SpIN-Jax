@@ -19,6 +19,7 @@ from flax.core import FrozenDict
 import time
 from tqdm import tqdm
 from pathlib import Path
+from flax.training import checkpoints
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
     model = EigenNet(
@@ -102,7 +103,7 @@ def train_step(model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t
     loss = jnp.trace(Lambda)
     energies = jnp.diag(Lambda)
 
-    return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv
+    return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state
 
 
 if __name__ == '__main__':
@@ -119,16 +120,17 @@ if __name__ == '__main__':
     n_eigenfuncs = 9
 
     # Optimizer
-    learning_rate = 1e-5
+    learning_rate = 1e-4
     decay_rate = 0.999
     moving_average_beta = 0.01
 
     # Train setup
     num_epochs = 2000
     batch_size = 256
+    save_dir = './results/{}'.format(system)
 
     # Simulation size
-    D = 50
+    D = 1
 
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(
@@ -137,16 +139,22 @@ if __name__ == '__main__':
     sigma_t_bar = jnp.eye(n_eigenfuncs)
     j_sigma_t_bar = {key: jnp.zeros_like(
         weight_dict['params'][key]['kernel']) for key in weight_dict['params'].keys()}
-
+    start_epoch = 0
     loss = []
     energies = []
-    for epoch in tqdm(range(num_epochs)):
+
+    if Path(save_dir).is_dir():
+        weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
+        loss, energies = np.load('{}/loss.npy'.format(save_dir)).tolist(), np.load('{}/energies.npy'.format(save_dir)).tolist()
+
+    pbar = tqdm(range(start_epoch+1, start_epoch+num_epochs+1))
+    for epoch in pbar:
         batch = jax.random.uniform(
             rng, minval=-D, maxval=D, shape=(batch_size, 2))
-
         # Run an optimization step over a training batch
-        new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv = train_step(
+        new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(
             model, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
+        pbar.set_description('Loss {}'.format(np.around(np.asarray(new_loss), 3)))
 
         '''
         weight_dict = EigenNet.sparsify_weights(
@@ -158,34 +166,40 @@ if __name__ == '__main__':
         loss.append(new_loss)
         energies.append(new_energies)
 
+
         if epoch % 200 == 0:
+            checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir), (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
+            np.save('{}/loss'.format(save_dir), loss), np.save('{}/energies'.format(save_dir), energies)
+
             for i in range(n_eigenfuncs):
-                helper.plot_2d_output(model, weight_dict, D, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=2, N=100, save_dir='./results/{}/eigenfunctions/epoch_{}'.format(system, epoch))
+                helper.plot_2d_output(model, weight_dict, D, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=2, N=100, save_dir='{}/eigenfunctions/epoch_{}'.format(save_dir, epoch))
 
             energies_array = np.array(energies)
-            save_dir = './results/{}'.format(system)
             Path(save_dir).mkdir(parents=True, exist_ok=True)
             for i in range(n_eigenfuncs):
-                plt.plot(energies_array[:, i], label='Eigenvalue {}'.format(i))
+                plt.plot(energies_array[:, i], label='Eigenvalue {}'.format(i),)
+            plt.legend()
             plt.savefig('{}/energies'.format(save_dir, save_dir))
             plt.close()
 
             for i in range(n_eigenfuncs):
                 plt.plot(energies_array[-500:, i], label='Eigenvalue {}'.format(i))
+            plt.legend()
             plt.savefig('{}/energies_newest'.format(save_dir, save_dir))
             plt.close()
 
-            save_dir = './results/{}'.format(system)
             plt.plot(loss)
             plt.savefig('{}/loss'.format(save_dir))
             plt.close()
 
-            save_dir = './results/{}'.format(system)
             plt.plot(loss[-500:])
             plt.savefig('{}/loss_newest'.format(save_dir))
             plt.close()
 
-    plt.legend()
-    plt.show()
+            np.save('{}/loss'.format(save_dir), loss)
+            np.save('{}/energies'.format(save_dir), energies)
+
+
+
 
 
