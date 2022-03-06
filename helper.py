@@ -27,26 +27,39 @@ def save_checkpoint(save_dir, weight_dict, optimizer, epoch):
 
 
 
-def plot_2d_output(model, weight_dict, D, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100, save_dir=None):
+def plot_output(model, weight_dict, D, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100, save_dir=None):
 
-    # generate 2 2d grids for the x & y bounds
-    y, x = np.meshgrid(np.linspace(-D, D, N), np.linspace(-D, D, N))
-    coordinates = np.stack([x, y], axis=-1).reshape(-1, 2)
+    if n_space_dimension == 1:
+        x = np.linspace(-D,D, N)[:,None]
+        if L_inv is not None:
+            z = model.apply(weight_dict, (x, L_inv))[:, n_eigenfunc]
+            # print('Min ', jnp.min(z), ' Max ', jnp.max(z))
+        else:
+            z = model.apply(weight_dict, x)[:, n_eigenfunc]
+        z_min, z_max = -np.abs(z).max(), np.abs(z).max()
 
-    if L_inv is not None:
-        z = model.apply(weight_dict, (coordinates, L_inv))[:, n_eigenfunc].reshape(N, N)
-        #print('Min ', jnp.min(z), ' Max ', jnp.max(z))
-    else:
-        z = model.apply(weight_dict, coordinates)[:, n_eigenfunc].reshape(N, N)
-    z_min, z_max = -np.abs(z).max(), np.abs(z).max()
+        plt.plot(x,z)
 
-    fig, ax = plt.subplots()
+    elif n_space_dimension == 2:
+        # generate 2 2d grids for the x & y bounds
+        y, x = np.meshgrid(np.linspace(-D, D, N), np.linspace(-D, D, N))
+        coordinates = np.stack([x, y], axis=-1).reshape(-1, 2)
 
-    c = ax.pcolormesh(x, y, z, cmap='RdBu', vmin=z_min, vmax=z_max)
-    ax.set_title('Eigenfunction {}'.format(n_eigenfunc))
-    # set the limits of the plot to the limits of the data
-    ax.axis([x.min(), x.max(), y.min(), y.max()])
-    fig.colorbar(c, ax=ax)
+        if L_inv is not None:
+            z = model.apply(weight_dict, (coordinates, L_inv))[:, n_eigenfunc].reshape(N, N)
+            #print('Min ', jnp.min(z), ' Max ', jnp.max(z))
+        else:
+            z = model.apply(weight_dict, coordinates)[:, n_eigenfunc].reshape(N, N)
+        z_min, z_max = -np.abs(z).max(), np.abs(z).max()
+
+        fig, ax = plt.subplots()
+
+        c = ax.pcolormesh(x, y, z, cmap='RdBu', vmin=z_min, vmax=z_max)
+        ax.set_title('Eigenfunction {}'.format(n_eigenfunc))
+        # set the limits of the plot to the limits of the data
+        ax.axis([x.min(), x.max(), y.min(), y.max()])
+        fig.colorbar(c, ax=ax)
+
 
     if save_dir is None:
         plt.show()

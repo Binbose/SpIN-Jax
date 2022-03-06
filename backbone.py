@@ -9,6 +9,30 @@ from flax.core import FrozenDict
 import numpy as np                     # Ordinary NumPy
 from typing import Sequence
 from flax.linen import jit
+from jax import random, jit, vmap, jacfwd
+
+
+def JaxEigenNeet(layers):
+    def init(rng_key):
+        def init_layer(key, d_in, d_out):
+            k1, k2 = random.split(key)
+            W = random.normal(k1, (d_in, d_out))
+            b = random.normal(k2, (d_out,))
+            return W, b
+        key, *keys = random.split(rng_key, len(layers))
+        params = list(map(init_layer, keys, layers[:-1], layers[1:]))
+        return params
+
+    def apply(params, inputs):
+        for W, b in params[:-1]:
+            outputs = np.dot(inputs, W) + b
+            inputs = sigmoid(outputs)
+        W, b = params[-1]
+        outputs = np.dot(inputs, W) + b
+        return outputs
+    return init, apply
+
+
 
 class EigenNet(nn.Module):
     features: Sequence[int]
@@ -23,11 +47,11 @@ class EigenNet(nn.Module):
         x = nn.Dense(self.features[0], use_bias=False, kernel_init=jax.nn.initializers.lecun_normal())(x_in)
 
         # softplus of x is log(1+exp(x))
-        x = nn.softplus(x)
+        x = nn.sigmoid(x)
 
         for feat in self.features[1:-1]:
             x = nn.Dense(feat, use_bias=False, kernel_init=jax.nn.initializers.lecun_normal())(x)
-            x = nn.softplus(x)
+            x = nn.sigmoid(x)
         x = nn.Dense(self.features[-1], use_bias=False, kernel_init=jax.nn.initializers.lecun_normal())(x)
 
         # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition

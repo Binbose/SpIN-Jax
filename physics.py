@@ -6,7 +6,7 @@ import time
 def get_hydrogen_potential():
 
     def hygrogen_potential(x):
-        return 1/jnp.linalg.norm(50 * x, axis=-1)
+        return 1/jnp.linalg.norm(x, axis=-1)
 
     return hygrogen_potential
 
@@ -18,8 +18,11 @@ def second_difference_along_coordinate(fn, fn_x, x , i, eps):
 def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system='hydrogen'):
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()
+    elif system == 'laplace':
+        v_fn = lambda x: 0
     else:
-        v_fn = get_hydrogen_potential()
+        v_fn = lambda x: 0
+
 
     if fn_x is None:
         fn_x = fn(x)
