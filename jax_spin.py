@@ -272,6 +272,10 @@ def laplacian_1d(u_fn, params, inputs):
         return u_xx
     vec_fun = vmap(action, in_axes = (None, 0))
     laplacian = vec_fun(params, inputs)
+
+    print('Output ', u_fn(params,inputs)[0])
+    print(laplacian[0])
+    exit()
     return np.squeeze(laplacian)
 
 def laplacian_2d(u_fn, params, inputs):

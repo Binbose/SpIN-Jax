@@ -16,7 +16,7 @@ def second_difference_along_coordinate(fn, fn_x, x , i, eps):
     coordinate[:,i] = 1
     return fn(x + coordinate * eps) + fn(x - coordinate * eps) - 2 * fn_x
 
-def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system='hydrogen'):
+def hamiltonian_operator(model_apply_jitted, fn, x, params, fn_x=None, nummerical_diff=True, eps=0.1, system='hydrogen'):
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()
     elif system == 'laplace':
@@ -37,9 +37,20 @@ def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system
             differences += second_difference_along_coordinate(fn, fn_x, x, i, eps)
         #second_derivative = differences
         laplacian = differences / eps**2
+
+        print('Output ', model_apply_jitted(params,x)[0])
+        print(laplacian.shape)
+        print(laplacian[0])
+        laplacian = get_hessian_diagonals_2(model_apply_jitted, params, x)
+        print(laplacian.shape)
+        print(laplacian[0])
+        exit()
     else:
         #second_derivative = jnp.diag(jax.jacobian(jax.jacobian(fn))(x)).sum(-1)
-        #laplacian = get_hessian_diagonals(fn, x).sum(-1)
-        laplacian = get_hessian_diagonals_2(fn, x).sum(-1)
+        laplacian = get_hessian_diagonals(fn, x).sum(-1)
+        print(laplacian[0])
+        laplacian = get_hessian_diagonals_2(model_apply_jitted, params, x)
+        print(laplacian[0])
+
 
     return laplacian + v

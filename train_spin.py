@@ -81,7 +81,7 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
     pred = u_of_x(batch)
     del_u_del_weights = jacrev(u_of_w)(weight_dict)
 
-    h_u = hamiltonian_operator(u_of_x, batch, fn_x=pred, system=system, nummerical_diff=False, eps=0.01)
+    h_u = hamiltonian_operator(model_apply_jitted, u_of_x, batch, weight_dict, fn_x=pred, system=system, nummerical_diff=True, eps=0.01)
     print(h_u.sum(0))
     exit()
     masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)

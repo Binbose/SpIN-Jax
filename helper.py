@@ -23,7 +23,7 @@ def get_hessian_diagonals(fn, x):
 
 
 
-def get_hessian_diagonals_2(fn, x):
+def get_hessian_diagonals_2(fn, params, x):
     '''
     def second_derivative(x):
         second_derivatice = jacfwd(jacfwd(fn))(x)
@@ -33,11 +33,14 @@ def get_hessian_diagonals_2(fn, x):
     laplacian = vec_second_derivative(fn)(x)
     return laplacian
     '''
+
     def action(params, inputs):
         u_xx = jacfwd(jacfwd(fn, 1), 1)(params, inputs)
         return u_xx
-    vec_fun = vmap(action, in_axes = (None, 0))
-    laplacian = vec_fun(fn, x)
+
+    vec_fun = vmap(action, in_axes=(None, 0))
+    laplacian = vec_fun(params, x)
+
     return np.squeeze(laplacian)
 
 
