@@ -10,28 +10,7 @@ import numpy as np                     # Ordinary NumPy
 from typing import Sequence
 from flax.linen import jit
 from jax import random, jit, vmap, jacfwd
-
-
-def JaxEigenNeet(layers):
-    def init(rng_key):
-        def init_layer(key, d_in, d_out):
-            k1, k2 = random.split(key)
-            W = random.normal(k1, (d_in, d_out))
-            b = random.normal(k2, (d_out,))
-            return W, b
-        key, *keys = random.split(rng_key, len(layers))
-        params = list(map(init_layer, keys, layers[:-1], layers[1:]))
-        return params
-
-    def apply(params, inputs):
-        for W, b in params[:-1]:
-            outputs = np.dot(inputs, W) + b
-            inputs = sigmoid(outputs)
-        W, b = params[-1]
-        outputs = np.dot(inputs, W) + b
-        return outputs
-    return init, apply
-
+from jax.nn import sigmoid
 
 
 class EigenNet(nn.Module):
@@ -44,24 +23,31 @@ class EigenNet(nn.Module):
             x_in, L_inv = x_in
         else:
             L_inv = None
-        x = nn.Dense(self.features[0], use_bias=False, kernel_init=jax.nn.initializers.lecun_normal())(x_in)
 
-        # softplus of x is log(1+exp(x))
-        x = nn.sigmoid(x)
+        x = nn.Dense(self.features[0], use_bias=False)(x_in)
+        x = sigmoid(x)
 
         for feat in self.features[1:-1]:
-            x = nn.Dense(feat, use_bias=False, kernel_init=jax.nn.initializers.lecun_normal())(x)
-            x = nn.sigmoid(x)
-        x = nn.Dense(self.features[-1], use_bias=False, kernel_init=jax.nn.initializers.lecun_normal())(x)
-
+            x = nn.Dense(feat, use_bias=False)(x)
+            x = sigmoid(x)
+        x = nn.Dense(self.features[-1], use_bias=False)(x)
         # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition
         # See page 16th for more information
+
+        '''
         d = jnp.sqrt(2 * self.D ** 2 - x_in ** 2) - self.D
         d = jnp.prod(d, axis=-1, keepdims=True)
         x = x * d
 
         if L_inv is not None:
             x = jnp.einsum('ij, bj -> bi', L_inv, x)
+        '''
+        mask = 0.1
+        if len(x_in.shape) == 2:
+            for i in range(x_in.shape[1]):
+                mask *= np.maximum((-x_in[:, i] ** 2 + np.pi * x_in[:, i]), 0)
+            mask = np.expand_dims(mask, -1)
+            x = x*mask
         return x
 
     @staticmethod

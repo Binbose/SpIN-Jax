@@ -6,17 +6,39 @@ import matplotlib.pyplot as plt
 from backbone import EigenNet
 from jax import jvp, grad
 from pathlib import Path
+from flax.training import checkpoints
+from jax import vmap
+from jax import jacfwd
+
+def vectorized_diagonal(m):
+    return vmap(jnp.diag)(m)
+
 
 def get_hessian_diagonals(fn, x):
-    return jnp.diag(jax.hessian(fn)(x))
+    vectorized_hessian = vmap(jax.hessian(fn))
+    vectorized_hessian_result = vectorized_hessian(x)
+    batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], vectorized_hessian_result.shape[2], vectorized_hessian_result.shape[3]
+    vectorized_hessian_result = vectorized_hessian_result.reshape(batch*n_eigenfunc, c1, c2)
+    return vectorized_diagonal(vectorized_hessian_result).reshape(batch, n_eigenfunc, -1)
 
-
-def hvp(f, x, v):
-    return jvp(grad(f), (x,), (v,))[1]
 
 
 def get_hessian_diagonals_2(fn, x):
-    return hvp(fn, x, jnp.ones_like(x))
+    '''
+    def second_derivative(x):
+        second_derivatice = jacfwd(jacfwd(fn))(x)
+        return second_derivatice
+
+    vec_second_derivative = vmap(second_derivative, in_axes=(None, 0))
+    laplacian = vec_second_derivative(fn)(x)
+    return laplacian
+    '''
+    def action(params, inputs):
+        u_xx = jacfwd(jacfwd(fn, 1), 1)(params, inputs)
+        return u_xx
+    vec_fun = vmap(action, in_axes = (None, 0))
+    laplacian = vec_fun(fn, x)
+    return np.squeeze(laplacian)
 
 
 def moving_average(running_average, new_data, beta):
@@ -67,6 +89,41 @@ def plot_output(model, weight_dict, D, n_eigenfunc=0, L_inv=None, n_space_dimens
         Path(save_dir).mkdir(parents=True, exist_ok=True)
         plt.savefig('{}/eigenfunc_{}'.format(save_dir, n_eigenfunc))
         plt.close()
+
+
+def create_checkpoint(save_dir, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv):
+    checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir),
+                                (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
+    np.save('{}/loss'.format(save_dir), loss), np.save('{}/energies'.format(save_dir), energies)
+
+    for i in range(n_eigenfuncs):
+        plot_output(model, weight_dict, D, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension,
+                           N=100, save_dir='{}/eigenfunctions/epoch_{}'.format(save_dir, epoch))
+
+    energies_array = np.array(energies)
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
+    for i in range(n_eigenfuncs):
+        plt.plot(energies_array[:, i], label='Eigenvalue {}'.format(i), )
+    plt.legend()
+    plt.savefig('{}/energies'.format(save_dir, save_dir))
+    plt.close()
+
+    for i in range(n_eigenfuncs):
+        plt.plot(energies_array[-500:, i], label='Eigenvalue {}'.format(i))
+    plt.legend()
+    plt.savefig('{}/energies_newest'.format(save_dir, save_dir))
+    plt.close()
+
+    plt.plot(loss)
+    plt.savefig('{}/loss'.format(save_dir))
+    plt.close()
+
+    plt.plot(loss[-500:])
+    plt.savefig('{}/loss_newest'.format(save_dir))
+    plt.close()
+
+    np.save('{}/loss'.format(save_dir), loss)
+    np.save('{}/energies'.format(save_dir), energies)
 
 
 if __name__ == '__main__':

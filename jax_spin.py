@@ -25,10 +25,10 @@ def MLP(layers):
         return params
     def apply(params, inputs):
         for W, b in params[:-1]:
-            outputs = np.dot(inputs, W) + b
+            outputs = np.dot(inputs, W) #+ b
             inputs = sigmoid(outputs)
         W, b = params[-1]
-        outputs = np.dot(inputs, W) + b
+        outputs = np.dot(inputs, W) #+ b
         return outputs
     return init, apply
 
@@ -39,17 +39,17 @@ class Sampler:
         self.coords = coords
         self.name = name
 
-    def sample(self, N, key = random.PRNGKey(1234)):
+    def sample(self, N, key = random.PRNGKey(1239)):
         x = self.coords.min(1) + (self.coords.max(1)-self.coords.min(1))*random.uniform(key, (N, self.dim))
         return x
 
 
 class DataGenerator(data.Dataset):
-    def __init__(self, dom_sampler, mu_X = 0.0, sigma_X = 1.0, batch_size=64):
+    def __init__(self, dom_sampler, batch_size=64):
         'Initialization'
         self.dom_sampler = dom_sampler
         self.batch_size = batch_size
-        self.key = random.PRNGKey(1234)
+        self.key = random.PRNGKey(10001)
 
     def __getitem__(self, index):
         'Generate one batch of data'
@@ -57,7 +57,7 @@ class DataGenerator(data.Dataset):
         X = self.__data_generation(subkey)
         return X
 
-    @partial(jit, static_argnums=(0,))
+    #@partial(jit, static_argnums=(0,))
     def __data_generation(self, key):
         'Generates data containing batch_size samples'
         inputs = self.dom_sampler.sample(self.batch_size, key)
@@ -74,7 +74,8 @@ class SpIN:
         self.net_init, self.net_apply = MLP(layers)
         
         # Initialize network parameters
-        params = self.net_init(random.PRNGKey(0))
+        params = self.net_init(random.PRNGKey(2))
+        np.save('./weights', params)
 
         # Optimizer initialization and update functions
         lr = optimizers.exponential_decay(1e-4, decay_steps=1000, decay_rate=0.9)
@@ -105,8 +106,6 @@ class SpIN:
             for x in inputs:
                 mask *= np.maximum((-x ** 2 + np.pi * x ), 0)
 
-        mask = mask>0
-        mask = mask*0.1
         return mask*outputs
         
     def net_u(self, params, inputs):
@@ -120,20 +119,24 @@ class SpIN:
         sigma_avg, _ = averages
         
         # Evaluate model
-        t1 = time.time()
+        np.save('./batch', inputs)
+        #print(params[0])
         u = self.net_u(params, inputs)
+
         sigma = np.dot(u.T, u)/n
         sigma_avg = (1.0 - beta) * sigma_avg + beta * sigma # $\bar{\Sigma}$
-  
+
         # Cholesky
-        chol = np.linalg.cholesky(sigma_avg) 
+        chol = np.linalg.cholesky(sigma_avg)
         choli = np.linalg.inv(chol) # $L^{-1}$
-        
+
         # Operator
         operator = self.operator(self.net_u, params, inputs)
+        print(operator.sum(0))
+        exit()
         pi = np.dot(operator.T, u)/n # $\Pi$
         rq = np.dot(choli, np.dot(pi, choli.T)) # $\Lambda$
-        
+
         return (u, choli, pi, rq, operator), sigma_avg
     
     def masked_gradients(self, params, inputs, outputs, averages, beta):
@@ -189,6 +192,7 @@ class SpIN:
         _, _, _, rq, _ = outputs
         eigenvalues = np.diag(rq)  # eigenvalues are the diagonal entries of $\Lamda$
         loss = np.sum(eigenvalues)
+
         
         # Compute masked gradients
         gradients, sigma_jac_avg = self.masked_gradients(params, 
@@ -206,13 +210,14 @@ class SpIN:
         u = model.net_u(params, inputs)
         grad_param = jacfwd(model.net_u) 
         grad_theta = grad_param(params, inputs)
-        sigma_jac = tree_multimap(lambda x: np.tensordot(u.T, x, 1), 
+
+        sigma_jac = tree_multimap(lambda x: np.tensordot(u.T, x, 1)*0,
                                           grad_theta)
+
         return sigma_jac
 
-    
     # Define a jit-compiled update step
-    @partial(jit, static_argnums=(0,))
+    #@partial(jit, static_argnums=(0,))
     def step(self, i, opt_state, batch):
         params = self.get_params(opt_state)
         loss, gradients, averages = self.loss_and_grad(params, batch)
@@ -252,7 +257,7 @@ class SpIN:
             
             
     # Evaluates predictions at test points  
-    @partial(jit, static_argnums=(0,))
+    #@partial(jit, static_argnums=(0,))
     def eigenpairs(self, params, inputs, averages, beta):
         outputs, _ = self.evaluate_spin(params, inputs, averages, beta)
         u, choli, _, rq, _ = outputs
@@ -308,7 +313,7 @@ x_star = np.linspace(0.0, np.pi, n_star)[:,None]
 layers = [ndim, 64, 64, 64, 32, neig]
 model = SpIN(laplacian_1d, layers)
 
-opt_params, averages, beta = model.train(dataset, nIter = 3000)
+opt_params, averages, beta = model.train(dataset, nIter=3000)
 
 
 evals, efuns = model.eigenpairs(opt_params, x_star, averages, beta)
@@ -319,7 +324,7 @@ print('True eigenvalues: {}'.format(evals_true))
 
 
 plt.figure(figsize=(24,6))
-plt.subplot(1,3,1)
+plt.subplot(1, 3, 1)
 plt.plot(x_star, efuns)
 plt.xlabel('x')
 plt.ylabel('u(x)')

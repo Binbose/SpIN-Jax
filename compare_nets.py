@@ -43,23 +43,21 @@ class EigenNet(nn.Module):
 
         return x
 
-
-rng = jax.random.PRNGKey(0)
+r=5
+rng = jax.random.PRNGKey(r)
 rng, init_rng = jax.random.split(rng)
 D = np.pi
 
 layers = [1, 64, 64, 64, 32, 4]
 net_init, net_apply = MLP(layers)
-params = net_init(random.PRNGKey(0))
+params = net_init(random.PRNGKey(r))
 
 inputs = jax.random.uniform(rng, minval=-D, maxval=D, shape=(128, 1))
-_ = net_apply(params, inputs)
-
-inputs = jax.random.uniform(rng, minval=-D, maxval=D, shape=(128, 1))
+outputs = net_apply(params, inputs)
 
 # jit and pre-compile (we don't want to compare compile times)
 net_apply_jitted = jax.jit(net_apply)
-_ = net_apply_jitted(params, inputs)
+outputs = net_apply_jitted(params, inputs)
 
 t1 = time.time()
 outputs = net_apply(params, inputs)
@@ -67,6 +65,7 @@ print('TIME JAX ', time.time()-t1)
 
 t1 = time.time()
 outputs = net_apply_jitted(params, inputs).block_until_ready()
+print(outputs.sum())
 print('TIME JAX JITTED', time.time()-t1)
 
 #############################################################################
@@ -84,5 +83,6 @@ _ = model.apply(params, inputs)
 print('TIME FLAX ', time.time()-t1)
 
 t1 = time.time()
-_ = flax_apply_jitted(params, inputs).block_until_ready()
+outputs = flax_apply_jitted(params, inputs).block_until_ready()
+print(outputs.sum())
 print('TIME FLAX JITTED', time.time()-t1)

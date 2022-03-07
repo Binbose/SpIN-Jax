@@ -2,6 +2,7 @@ import jax.numpy as jnp
 import numpy as np
 from helper import get_hessian_diagonals, get_hessian_diagonals_2
 import time
+import jax
 
 def get_hydrogen_potential():
 
@@ -19,22 +20,26 @@ def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()
     elif system == 'laplace':
-        v_fn = lambda x: 0
+        v_fn = lambda x: 0*x
     else:
-        v_fn = lambda x: 0
+        v_fn = lambda x: 0*x
 
 
     if fn_x is None:
         fn_x = fn(x)
-    v = v_fn(x)[:, None] * fn_x
+    v_fn = v_fn(x)
+    if len(v_fn.shape) != len(fn_x.shape):
+        v_fn = v_fn[:, None]
+    v = v_fn * fn_x
     if nummerical_diff:
         differences = 0
         for i in range(x.shape[1]):
             differences += second_difference_along_coordinate(fn, fn_x, x, i, eps)
         #second_derivative = differences
-        second_derivative = differences / eps**2
+        laplacian = differences / eps**2
     else:
-        second_derivative = get_hessian_diagonals(fn, x)
+        #second_derivative = jnp.diag(jax.jacobian(jax.jacobian(fn))(x)).sum(-1)
+        #laplacian = get_hessian_diagonals(fn, x).sum(-1)
+        laplacian = get_hessian_diagonals_2(fn, x).sum(-1)
 
-
-    return -(second_derivative + v)
+    return laplacian + v
