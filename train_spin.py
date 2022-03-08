@@ -21,9 +21,12 @@ from tqdm import tqdm
 from pathlib import Path
 from flax.training import checkpoints
 from jax import jit
+from jax.config import config
 
-def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
-    model = EigenNet(features=n_dense_neurons + [n_eigenfuncs], D=D)
+config.update("jax_debug_nans", True)
+
+def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
+    model = EigenNet(features=n_dense_neurons + [n_eigenfuncs], D=D_max)
     batch = jnp.ones((batch_size, n_space_dimension))
     weight_dict = model.init(init_rng, batch)
     layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
@@ -82,6 +85,7 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
     pred = u_of_x(batch)
     del_u_del_weights = jacrev(u_of_w)(weight_dict)
 
+
     h_u = hamiltonian_operator(model_apply_jitted, u_of_x, batch, weight_dict, fn_x=pred, system=system, nummerical_diff=False, eps=0.01)
     masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
 
@@ -96,7 +100,7 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
 
 
 if __name__ == '__main__':
-    rng = jax.random.PRNGKey(8)
+    rng = jax.random.PRNGKey(1)
     rng, init_rng = jax.random.split(rng)
 
     # Problem definition
@@ -113,8 +117,8 @@ if __name__ == '__main__':
 
     # Optimizer
     learning_rate = 1e-5
-    decay_rate = 0.9
-    moving_average_beta = 0.5
+    decay_rate = 0.999
+    moving_average_beta = 1
 
     # Train setup
     num_epochs = 3000
@@ -122,17 +126,20 @@ if __name__ == '__main__':
     save_dir = './results/{}'.format(system)
 
     # Simulation size
-    D = np.pi
+    D_min = 0
+    D_max = np.pi
 
     # Create initial state
-    model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
+    model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
     weight_dict = weight_dict.unfreeze()
 
-    weight_list = np.load('./weights.npy', allow_pickle=True)
 
+    '''
+    weight_list = np.load('./weights.npy', allow_pickle=True)
     for i, key in enumerate(weight_dict['params'].keys()):
         w, b = weight_list[i]
         weight_dict['params'][key]['kernel'] = w
+    '''
 
     sigma_t_bar = jnp.eye(n_eigenfuncs)
     j_sigma_t_bar = {key: jnp.zeros_like(weight_dict['params'][key]['kernel']) for key in weight_dict['params'].keys()}
@@ -141,7 +148,7 @@ if __name__ == '__main__':
     energies = []
 
     model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
-    #model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
+    model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
 
     if Path(save_dir).is_dir():
         weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
@@ -149,8 +156,7 @@ if __name__ == '__main__':
 
     pbar = tqdm(range(start_epoch+1, start_epoch+num_epochs+1))
     for epoch in pbar:
-        batch = jax.random.uniform(rng, minval=0, maxval=D, shape=(batch_size, n_space_dimension))
-        #batch = np.load('./batch.npy')
+        batch = jax.random.uniform(rng, minval=D_min, maxval=D_max, shape=(batch_size, n_space_dimension))
         # Run an optimization step over a training batch
         new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
         pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
@@ -167,7 +173,7 @@ if __name__ == '__main__':
 
 
         if epoch % 1000 == 0:
-            helper.create_checkpoint(save_dir, model, weight_dict, D, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv)
+            helper.create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv)
 
 
 

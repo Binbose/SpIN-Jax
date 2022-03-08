@@ -50,10 +50,10 @@ def moving_average(running_average, new_data, beta):
 
 
 
-def plot_output(model, weight_dict, D, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100, save_dir=None):
+def plot_output(model, weight_dict, D_min, D_max, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100, save_dir=None):
 
     if n_space_dimension == 1:
-        x = np.linspace(-D,D, N)[:,None]
+        x = np.linspace(D_min,D_max, N)[:,None]
         if L_inv is not None:
             z = model.apply(weight_dict, (x, L_inv))[:, n_eigenfunc]
             # print('Min ', jnp.min(z), ' Max ', jnp.max(z))
@@ -65,7 +65,7 @@ def plot_output(model, weight_dict, D, n_eigenfunc=0, L_inv=None, n_space_dimens
 
     elif n_space_dimension == 2:
         # generate 2 2d grids for the x & y bounds
-        y, x = np.meshgrid(np.linspace(-D, D, N), np.linspace(-D, D, N))
+        y, x = np.meshgrid(np.linspace(D_min, D_max, N), np.linspace(D_min, D_max, N))
         coordinates = np.stack([x, y], axis=-1).reshape(-1, 2)
 
         if L_inv is not None:
@@ -92,12 +92,12 @@ def plot_output(model, weight_dict, D, n_eigenfunc=0, L_inv=None, n_space_dimens
         plt.close()
 
 
-def create_checkpoint(save_dir, model, weight_dict, D, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv):
+def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv):
     checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir), (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
     np.save('{}/loss'.format(save_dir), loss), np.save('{}/energies'.format(save_dir), energies)
 
     for i in range(n_eigenfuncs):
-        plot_output(model, weight_dict, D, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension,
+        plot_output(model, weight_dict, D_min, D_max, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension,
                            N=100, save_dir='{}/eigenfunctions/epoch_{}'.format(save_dir, epoch))
 
     energies_array = np.array(energies)
@@ -143,5 +143,5 @@ if __name__ == '__main__':
         weight_dict, layer_sparsifying_masks)
     output = model.apply(weight_dict, batch)
 
-    plot_2d_output(model, weight_dict, D, n_eigenfunc=2,
+    plot_2d_output(model, weight_dict, -D,D, n_eigenfunc=2,
                    n_space_dimension=n_space_dimension, N=N)
