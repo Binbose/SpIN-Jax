@@ -42,7 +42,6 @@ def get_network_as_function_of_weights(model_apply, batch):
     return lambda weights: model_apply(weights, batch)
 
 # This jit seems not making any difference
-@jit
 def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta):
     sigma_t_hat = jnp.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
     pi_t_hat = jnp.mean(h_u[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
@@ -113,8 +112,8 @@ if __name__ == '__main__':
 
 
     # Optimizer
-    learning_rate = 1e-6
-    decay_rate = 0.999
+    learning_rate = 1e-5
+    decay_rate = 0.9
     moving_average_beta = 0.5
 
     # Train setup
