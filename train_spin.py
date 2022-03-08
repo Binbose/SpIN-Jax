@@ -42,6 +42,7 @@ def get_network_as_function_of_weights(model_apply, batch):
     return lambda weights: model_apply(weights, batch)
 
 # This jit seems not making any difference
+@jit
 def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta):
     sigma_t_hat = jnp.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
     pi_t_hat = jnp.mean(h_u[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
@@ -68,8 +69,9 @@ def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_
         j_sigma_t_hat = jnp.mean(j_sigma_t_hat, axis=0)
         j_sigma_t_bar[key] = moving_average(j_sigma_t_bar[key], j_sigma_t_hat, moving_average_beta)
 
-        masked_grad = j_pi_t_hat - j_sigma_t_bar[key]
+        masked_grad = -(j_pi_t_hat - j_sigma_t_bar[key])
         del_u_del_weights['params'][key]['kernel'] = masked_grad
+
 
     return FrozenDict(del_u_del_weights), Lambda, L_inv
 
@@ -81,11 +83,8 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
     pred = u_of_x(batch)
     del_u_del_weights = jacrev(u_of_w)(weight_dict)
 
-    h_u = hamiltonian_operator(model_apply_jitted, u_of_x, batch, weight_dict, fn_x=pred, system=system, nummerical_diff=True, eps=0.01)
-    print(h_u.sum(0))
-    exit()
+    h_u = hamiltonian_operator(model_apply_jitted, u_of_x, batch, weight_dict, fn_x=pred, system=system, nummerical_diff=False, eps=0.01)
     masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
-
 
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt.update(masked_gradient, opt_state)
@@ -114,12 +113,12 @@ if __name__ == '__main__':
 
 
     # Optimizer
-    learning_rate = 1e-4
+    learning_rate = 1e-6
     decay_rate = 0.999
-    moving_average_beta = 1
+    moving_average_beta = 0.5
 
     # Train setup
-    num_epochs = 5000
+    num_epochs = 3000
     batch_size = 128
     save_dir = './results/{}'.format(system)
 
@@ -142,8 +141,8 @@ if __name__ == '__main__':
     loss = []
     energies = []
 
-    #model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
-    model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
+    model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
+    #model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
 
     if Path(save_dir).is_dir():
         weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
@@ -151,8 +150,8 @@ if __name__ == '__main__':
 
     pbar = tqdm(range(start_epoch+1, start_epoch+num_epochs+1))
     for epoch in pbar:
-        #batch = jax.random.uniform(rng, minval=0, maxval=D, shape=(batch_size, n_space_dimension))
-        batch = np.load('./batch.npy')
+        batch = jax.random.uniform(rng, minval=0, maxval=D, shape=(batch_size, n_space_dimension))
+        #batch = np.load('./batch.npy')
         # Run an optimization step over a training batch
         new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
         pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
@@ -169,7 +168,7 @@ if __name__ == '__main__':
 
 
         if epoch % 1000 == 0:
-            helper.create_checkpoint(save_dir, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv)
+            helper.create_checkpoint(save_dir, model, weight_dict, D, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv)
 
 
 

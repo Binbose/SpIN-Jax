@@ -38,16 +38,25 @@ class EigenNet(nn.Module):
         d = jnp.sqrt(2 * self.D ** 2 - x_in ** 2) - self.D
         d = jnp.prod(d, axis=-1, keepdims=True)
         x = x * d
-
-        if L_inv is not None:
-            x = jnp.einsum('ij, bj -> bi', L_inv, x)
         '''
+
         mask = 0.1
         if len(x_in.shape) == 2:
             for i in range(x_in.shape[1]):
-                mask *= np.maximum((-x_in[:, i] ** 2 + np.pi * x_in[:, i]), 0)
-            mask = np.expand_dims(mask, -1)
+                mask *= jnp.maximum((-x_in[:, i] ** 2 + np.pi * x_in[:, i]), 0)
+            mask = jnp.expand_dims(mask, -1)
             x = x*mask
+        elif len(x_in.shape) == 1:
+            mask *= jnp.maximum((-x_in ** 2 + np.pi * x_in), 0)
+            mask = jnp.expand_dims(mask, -1)
+            x = x * mask
+            x = x[0]
+        else:
+            1/0
+
+        if L_inv is not None:
+            x = jnp.einsum('ij, bj -> bi', L_inv, x)
+
         return x
 
     @staticmethod
@@ -105,6 +114,22 @@ class EigenNet(nn.Module):
         weight_dict = FrozenDict(weight_dict)
         return weight_dict
 
+
+def apply_mask(self, inputs, outputs):
+    # mask is used to zero the boundary points.
+    mask = 0.1
+    if len(inputs.shape) == 2:
+        for i in range(inputs.shape[1]):
+            mask *= np.maximum((-inputs[:, i] ** 2 + np.pi * inputs[:, i]), 0)
+        mask = np.expand_dims(mask, -1)
+
+    elif len(inputs.shape) == 1:
+        for x in inputs:
+            mask *= np.maximum((-x ** 2 + np.pi * x), 0)
+
+    return mask * outputs
+
+#def get_model_apply()
 
 if __name__ == '__main__':
     D = 50

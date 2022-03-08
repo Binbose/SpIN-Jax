@@ -57,7 +57,7 @@ class DataGenerator(data.Dataset):
         X = self.__data_generation(subkey)
         return X
 
-    #@partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def __data_generation(self, key):
         'Generates data containing batch_size samples'
         inputs = self.dom_sampler.sample(self.batch_size, key)
@@ -79,7 +79,6 @@ class SpIN:
 
         # Optimizer initialization and update functions
         lr = optimizers.exponential_decay(1e-4, decay_steps=1000, decay_rate=0.9)
-
         self.opt_init, self.opt_update, self.get_params = optimizers.rmsprop(lr)
         self.opt_state = self.opt_init(params)
           
@@ -119,8 +118,7 @@ class SpIN:
         sigma_avg, _ = averages
         
         # Evaluate model
-        np.save('./batch', inputs)
-        #print(params[0])
+        #np.save('./batch', inputs)
         u = self.net_u(params, inputs)
 
         sigma = np.dot(u.T, u)/n
@@ -132,8 +130,6 @@ class SpIN:
 
         # Operator
         operator = self.operator(self.net_u, params, inputs)
-        print(operator.sum(0))
-        exit()
         pi = np.dot(operator.T, u)/n # $\Pi$
         rq = np.dot(choli, np.dot(pi, choli.T)) # $\Lambda$
 
@@ -217,7 +213,7 @@ class SpIN:
         return sigma_jac
 
     # Define a jit-compiled update step
-    #@partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def step(self, i, opt_state, batch):
         params = self.get_params(opt_state)
         loss, gradients, averages = self.loss_and_grad(params, batch)
@@ -257,7 +253,7 @@ class SpIN:
             
             
     # Evaluates predictions at test points  
-    #@partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def eigenpairs(self, params, inputs, averages, beta):
         outputs, _ = self.evaluate_spin(params, inputs, averages, beta)
         u, choli, _, rq, _ = outputs
@@ -273,9 +269,6 @@ def laplacian_1d(u_fn, params, inputs):
     vec_fun = vmap(action, in_axes = (None, 0))
     laplacian = vec_fun(params, inputs)
 
-    print('Output ', u_fn(params,inputs)[0])
-    print(laplacian[0])
-    exit()
     return np.squeeze(laplacian)
 
 def laplacian_2d(u_fn, params, inputs):

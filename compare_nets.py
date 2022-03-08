@@ -6,6 +6,8 @@ import jax
 from flax import linen as nn
 import numpy as np
 from typing import Sequence
+import helper
+from physics import hamiltonian_operator
 
 def MLP(layers):
     def init(rng_key):
@@ -20,10 +22,10 @@ def MLP(layers):
 
     def apply(params, inputs):
         for W, b in params[:-1]:
-            outputs = jnp.dot(inputs, W) + b
+            outputs = jnp.dot(inputs, W) #+ b
             inputs = sigmoid(outputs)
         W, b = params[-1]
-        outputs = jnp.dot(inputs, W) + b
+        outputs = jnp.dot(inputs, W) #+ b
         return outputs
     return init, apply
 
@@ -43,46 +45,82 @@ class EigenNet(nn.Module):
 
         return x
 
+def get_network_as_function_of_input(model_apply, params):
+    return lambda batch: model_apply(params, batch)
+
 r=5
 rng = jax.random.PRNGKey(r)
 rng, init_rng = jax.random.split(rng)
 D = np.pi
+#inputs = jax.random.uniform(rng, minval=-D, maxval=D, shape=(128, 1))
+inputs = np.load('./batch.npy')
+
+test_case = 'derivatives'
 
 layers = [1, 64, 64, 64, 32, 4]
 net_init, net_apply = MLP(layers)
 params = net_init(random.PRNGKey(r))
-
-inputs = jax.random.uniform(rng, minval=-D, maxval=D, shape=(128, 1))
-outputs = net_apply(params, inputs)
-
-# jit and pre-compile (we don't want to compare compile times)
-net_apply_jitted = jax.jit(net_apply)
-outputs = net_apply_jitted(params, inputs)
-
-t1 = time.time()
-outputs = net_apply(params, inputs)
-print('TIME JAX ', time.time()-t1)
-
-t1 = time.time()
-outputs = net_apply_jitted(params, inputs).block_until_ready()
-print(outputs.sum())
-print('TIME JAX JITTED', time.time()-t1)
-
-#############################################################################
+params = weight_list = np.load('./weights.npy', allow_pickle=True)
 
 model = EigenNet(features=[64, 64, 64, 32, 4])
-params = model.init(rng, inputs)
+weight_dict = model.init(rng, inputs)
+weight_dict = weight_dict.unfreeze()
+weight_list = params
+for i, key in enumerate(weight_dict['params'].keys()):
+    w, b = weight_list[i]
+    weight_dict['params'][key]['kernel'] = w
+flax_apply = lambda weight_dict, inputs: model.apply(weight_dict, inputs)
 
-# jit and pre-compile
-flax_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
-_ = flax_apply_jitted(params, inputs)
+if test_case == 'times':
+    outputs = net_apply(params, inputs)
 
-_ = model.apply(params, inputs)
-t1 = time.time()
-_ = model.apply(params, inputs)
-print('TIME FLAX ', time.time()-t1)
+    # jit and pre-compile (we don't want to compare compile times)
+    net_apply_jitted = jax.jit(net_apply)
+    outputs = net_apply_jitted(params, inputs)
 
-t1 = time.time()
-outputs = flax_apply_jitted(params, inputs).block_until_ready()
-print(outputs.sum())
-print('TIME FLAX JITTED', time.time()-t1)
+    t1 = time.time()
+    outputs = net_apply(params, inputs)
+    #print('TIME JAX ', time.time()-t1)
+
+    t1 = time.time()
+    outputs = net_apply_jitted(params, inputs).block_until_ready()
+    #print(outputs.sum())
+    #print('TIME JAX JITTED', time.time()-t1)
+
+
+
+    #############################################################################
+
+
+
+    # jit and pre-compile
+    flax_apply_jitted = jax.jit(lambda weight_dict, inputs: model.apply(weight_dict, inputs))
+    _ = flax_apply_jitted(weight_dict, inputs)
+
+    _ = model.apply(weight_dict, inputs)
+    t1 = time.time()
+    _ = model.apply(weight_dict, inputs)
+    #print('TIME FLAX ', time.time()-t1)
+
+    t1 = time.time()
+    outputs = flax_apply_jitted(weight_dict, inputs).block_until_ready()
+    #print(outputs.sum())
+    #print('TIME FLAX JITTED', time.time()-t1)
+
+
+elif test_case == 'derivatives':
+    u_of_x = get_network_as_function_of_input(net_apply, params)
+    outputs = u_of_x(inputs)
+    print('OUT 1 ', outputs[:3])
+    print()
+    h = hamiltonian_operator(net_apply, u_of_x, inputs, params, fn_x=outputs, system='laplace', nummerical_diff=True,
+                             eps=0.01)
+    print('\n\n')
+
+
+    u_of_x = get_network_as_function_of_input(flax_apply, weight_dict)
+    outputs = u_of_x(inputs)
+    print('OUT 2 ', outputs[:3])
+    print()
+    h = hamiltonian_operator(flax_apply, u_of_x, inputs, weight_dict, fn_x=outputs, system='laplace',
+                             nummerical_diff=True, eps=0.01)

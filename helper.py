@@ -13,10 +13,11 @@ from jax import jacfwd
 def vectorized_diagonal(m):
     return vmap(jnp.diag)(m)
 
+def vectorized_hessian(fn):
+    return vmap(jax.hessian(fn))
 
 def get_hessian_diagonals(fn, x):
-    vectorized_hessian = vmap(jax.hessian(fn))
-    vectorized_hessian_result = vectorized_hessian(x)
+    vectorized_hessian_result = vectorized_hessian(fn)(x)
     batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], vectorized_hessian_result.shape[2], vectorized_hessian_result.shape[3]
     vectorized_hessian_result = vectorized_hessian_result.reshape(batch*n_eigenfunc, c1, c2)
     return vectorized_diagonal(vectorized_hessian_result).reshape(batch, n_eigenfunc, -1)
@@ -46,9 +47,6 @@ def get_hessian_diagonals_2(fn, params, x):
 
 def moving_average(running_average, new_data, beta):
     return running_average - beta*(running_average - new_data)
-
-def save_checkpoint(save_dir, weight_dict, optimizer, epoch):
-    pass
 
 
 
@@ -94,9 +92,8 @@ def plot_output(model, weight_dict, D, n_eigenfunc=0, L_inv=None, n_space_dimens
         plt.close()
 
 
-def create_checkpoint(save_dir, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv):
-    checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir),
-                                (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
+def create_checkpoint(save_dir, model, weight_dict, D, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv):
+    checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir), (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
     np.save('{}/loss'.format(save_dir), loss), np.save('{}/energies'.format(save_dir), energies)
 
     for i in range(n_eigenfuncs):
