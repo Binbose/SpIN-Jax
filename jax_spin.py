@@ -220,6 +220,11 @@ class SpIN:
     def step(self, i, opt_state, batch):
         params = self.get_params(opt_state)
         loss, gradients, averages = self.loss_and_grad(params, batch, epoch=i)
+        print(gradients[0][0])
+        print()
+        exit()
+        if i == 3:
+            exit()
         opt_state = self.opt_update(i, gradients, opt_state)
         return loss, opt_state, averages
     

@@ -88,6 +88,8 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
 
     h_u = hamiltonian_operator(model_apply_jitted, u_of_x, batch, weight_dict, fn_x=pred, system=system, nummerical_diff=False, eps=0.01)
     masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
+    print(masked_gradient['params']['Dense_0']['kernel'])
+    exit()
 
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt.update(masked_gradient, opt_state)
@@ -133,30 +135,30 @@ if __name__ == '__main__':
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
     weight_dict = weight_dict.unfreeze()
 
-
-    '''
-    weight_list = np.load('./weights.npy', allow_pickle=True)
-    for i, key in enumerate(weight_dict['params'].keys()):
-        w, b = weight_list[i]
-        weight_dict['params'][key]['kernel'] = w
-    '''
-
     sigma_t_bar = jnp.eye(n_eigenfuncs)
     j_sigma_t_bar = {key: jnp.zeros_like(weight_dict['params'][key]['kernel']) for key in weight_dict['params'].keys()}
     start_epoch = 0
     loss = []
     energies = []
 
-    model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
+    #model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
     model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
 
     if Path(save_dir).is_dir():
         weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
         loss, energies = np.load('{}/loss.npy'.format(save_dir)).tolist(), np.load('{}/energies.npy'.format(save_dir)).tolist()
 
+
+    weight_list = np.load('./weights.npy', allow_pickle=True)
+    for i, key in enumerate(weight_dict['params'].keys()):
+        w, b = weight_list[i]
+        weight_dict['params'][key]['kernel'] = w
+
+
     pbar = tqdm(range(start_epoch+1, start_epoch+num_epochs+1))
     for epoch in pbar:
-        batch = jax.random.uniform(rng, minval=D_min, maxval=D_max, shape=(batch_size, n_space_dimension))
+        #batch = jax.random.uniform(rng, minval=D_min, maxval=D_max, shape=(batch_size, n_space_dimension))
+        batch = np.load('./batch_{}.npy'.format(epoch-1))
         # Run an optimization step over a training batch
         new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
         pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
