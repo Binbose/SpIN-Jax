@@ -57,7 +57,7 @@ class DataGenerator(data.Dataset):
         X = self.__data_generation(subkey)
         return X
 
-    @partial(jit, static_argnums=(0,))
+    #@partial(jit, static_argnums=(0,))
     def __data_generation(self, key):
         'Generates data containing batch_size samples'
         inputs = self.dom_sampler.sample(self.batch_size, key)
@@ -112,13 +112,15 @@ class SpIN:
         outputs = self.apply_mask(inputs, outputs)
         return outputs
     
-    def evaluate_spin(self, params, inputs, averages, beta):
+    def evaluate_spin(self, params, inputs, averages, beta, epoch=0):
         # Fetch batch
         n = inputs.shape[0]
         sigma_avg, _ = averages
         
         # Evaluate model
-        #np.save('./batch', inputs)
+        np.save('./batch_{}'.format(epoch), inputs)
+        if epoch == 3:
+            exit()
         u = self.net_u(params, inputs)
 
         sigma = np.dot(u.T, u)/n
@@ -174,7 +176,7 @@ class SpIN:
                        
         return gradients, sigma_jac_avg
     
-    def loss_and_grad(self, params, batch):
+    def loss_and_grad(self, params, batch, epoch=0):
         # Fetch batch
         inputs, averages, beta = batch
         
@@ -182,7 +184,8 @@ class SpIN:
         outputs, sigma_avg = self.evaluate_spin(params, 
                                                 inputs, 
                                                 averages, 
-                                                beta)
+                                                beta,
+                                                epoch=epoch)
         
         # Compute loss
         _, _, _, rq, _ = outputs
@@ -213,10 +216,10 @@ class SpIN:
         return sigma_jac
 
     # Define a jit-compiled update step
-    @partial(jit, static_argnums=(0,))
+    #@partial(jit, static_argnums=(0,))
     def step(self, i, opt_state, batch):
         params = self.get_params(opt_state)
-        loss, gradients, averages = self.loss_and_grad(params, batch)
+        loss, gradients, averages = self.loss_and_grad(params, batch, epoch=i)
         opt_state = self.opt_update(i, gradients, opt_state)
         return loss, opt_state, averages
     
@@ -253,7 +256,7 @@ class SpIN:
             
             
     # Evaluates predictions at test points  
-    @partial(jit, static_argnums=(0,))
+    #@partial(jit, static_argnums=(0,))
     def eigenpairs(self, params, inputs, averages, beta):
         outputs, _ = self.evaluate_spin(params, inputs, averages, beta)
         u, choli, _, rq, _ = outputs
