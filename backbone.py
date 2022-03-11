@@ -35,8 +35,8 @@ class EigenNet(nn.Module):
             x = nn.Dense(feat, use_bias=False, kernel_init=initilization(feat, 'fan_out', 'normal'))(x)
             x = sigmoid(x)
         x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization(self.features[-1], 'fan_out', 'normal'))(x)
-        '''
 
+        '''
         initilization = initializers.lecun_normal
         x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization())(x)
         x = sigmoid(x)
@@ -49,7 +49,9 @@ class EigenNet(nn.Module):
 
         # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition
         # See page 16th for more information
-        d = jnp.sqrt(2 * ((self.D_max-self.D_min)/2) ** 2 - (x_in - (self.D_max - self.D_min)/2) ** 2) - (self.D_max - self.D_min)/2
+
+        d = jnp.sqrt(2 * (self.D_max - (self.D_max + self.D_min) / 2) ** 2 - (x_in - (self.D_max + self.D_min) / 2) ** 2) - (self.D_max - (self.D_max + self.D_min) / 2)
+        #d = jnp.sqrt(2 * ((self.D_max-self.D_min)/2) ** 2 - (x_in - (self.D_max - self.D_min)/2) ** 2) - (self.D_max - self.D_min)/2
         d = jnp.prod(d, axis=-1, keepdims=True)
         x = x * d
 

@@ -100,13 +100,19 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
 
 
 if __name__ == '__main__':
+    def mask1(D_min, D_max, x_in):
+        return jnp.sqrt(2 * (D_max - (D_max + D_min) / 2) ** 2 - (x_in - (D_max + D_min) / 2) ** 2) - (D_max - (D_max + D_min) / 2)
+
+    def mask2(D_max, D_min, x_in):
+        return jnp.sqrt(2 * ((D_max-D_min)/2) ** 2 - (x_in - (D_max - D_min)/2) ** 2) - (D_max - D_min)/2
+
     rng = jax.random.PRNGKey(1)
     rng, init_rng = jax.random.split(rng)
 
     # Problem definition
     #system = 'hydrogen'
     system = 'laplace'
-    n_space_dimension = 1
+    n_space_dimension = 2
 
     # Hyperparameter
     # Network parameter
@@ -121,17 +127,19 @@ if __name__ == '__main__':
     moving_average_beta = 1
 
     # Train setup
-    num_epochs = 3000
+    num_epochs = 20000
     batch_size = 128
-    save_dir = './results/{}'.format(system)
+    save_dir = './results/{}_{}d'.format(system, n_space_dimension)
 
     # Simulation size
-    D_min = 0
-    D_max = np.pi
+    #D_min = 0
+    #D_max = np.pi
+    D_min = -25
+    D_max = 25
 
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
-    weight_dict = weight_dict.unfreeze()
+    #weight_dict = weight_dict.unfreeze()
 
     sigma_t_bar = jnp.eye(n_eigenfuncs)
     j_sigma_t_bar = {key: jnp.zeros_like(weight_dict['params'][key]['kernel']) for key in weight_dict['params'].keys()}
@@ -146,30 +154,19 @@ if __name__ == '__main__':
         weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
         loss, energies = np.load('{}/loss.npy'.format(save_dir)).tolist(), np.load('{}/energies.npy'.format(save_dir)).tolist()
 
-
-    weight_list = np.load('./weights.npy', allow_pickle=True)
-    for i, key in enumerate(weight_dict['params'].keys()):
-        w, b = weight_list[i]
-        print('Mean ', w.mean(), '  Var ', w.var())
-        print('Mean ', weight_dict['params'][key]['kernel'].mean(), '  Var ', weight_dict['params'][key]['kernel'].var())
-        print()
-        #weight_dict['params'][key]['kernel'] = w
-
-
-
     pbar = tqdm(range(start_epoch+1, start_epoch+num_epochs+1))
     for epoch in pbar:
         batch = jax.random.uniform(rng+epoch, minval=D_min, maxval=D_max, shape=(batch_size, n_space_dimension))
 
+
+        #weight_dict = EigenNet.sparsify_weights(
+        #    weight_dict, layer_sparsifying_masks)
+
+        weight_dict = weight_dict.unfreeze()
         # Run an optimization step over a training batch
         new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta, epoch)
         pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
 
-        '''
-        weight_dict = EigenNet.sparsify_weights(
-            weight_dict, layer_sparsifying_masks)
-        '''
-        weight_dict = weight_dict.unfreeze()
 
 
         loss.append(new_loss)
