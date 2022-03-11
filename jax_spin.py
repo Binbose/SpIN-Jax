@@ -12,6 +12,8 @@ from functools import partial
 from torch.utils import data
 from tqdm import trange
 import matplotlib.pyplot as plt
+from jax.config import config
+config.update("jax_enable_x64", True)
 
 def MLP(layers):
     def init(rng_key):
@@ -57,7 +59,7 @@ class DataGenerator(data.Dataset):
         X = self.__data_generation(subkey)
         return X
 
-    #@partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def __data_generation(self, key):
         'Generates data containing batch_size samples'
         inputs = self.dom_sampler.sample(self.batch_size, key)
@@ -78,7 +80,8 @@ class SpIN:
         np.save('./weights', params)
 
         # Optimizer initialization and update functions
-        lr = optimizers.exponential_decay(1e-4, decay_steps=1000, decay_rate=0.9)
+        #lr = optimizers.exponential_decay(1e-4, decay_steps=1000, decay_rate=0.9)
+        lr = 1e-4
         self.opt_init, self.opt_update, self.get_params = optimizers.rmsprop(lr)
         self.opt_state = self.opt_init(params)
           
@@ -118,9 +121,6 @@ class SpIN:
         sigma_avg, _ = averages
         
         # Evaluate model
-        np.save('./batch_{}'.format(epoch), inputs)
-        if epoch == 3:
-            exit()
         u = self.net_u(params, inputs)
 
         sigma = np.dot(u.T, u)/n
@@ -134,6 +134,7 @@ class SpIN:
         operator = self.operator(self.net_u, params, inputs)
         pi = np.dot(operator.T, u)/n # $\Pi$
         rq = np.dot(choli, np.dot(pi, choli.T)) # $\Lambda$
+
 
         return (u, choli, pi, rq, operator), sigma_avg
     
@@ -186,13 +187,13 @@ class SpIN:
                                                 averages, 
                                                 beta,
                                                 epoch=epoch)
-        
+
+
         # Compute loss
         _, _, _, rq, _ = outputs
         eigenvalues = np.diag(rq)  # eigenvalues are the diagonal entries of $\Lamda$
         loss = np.sum(eigenvalues)
 
-        
         # Compute masked gradients
         gradients, sigma_jac_avg = self.masked_gradients(params, 
                                                          inputs, 
@@ -216,16 +217,13 @@ class SpIN:
         return sigma_jac
 
     # Define a jit-compiled update step
-    #@partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def step(self, i, opt_state, batch):
         params = self.get_params(opt_state)
         loss, gradients, averages = self.loss_and_grad(params, batch, epoch=i)
-        print(gradients[0][0])
-        print()
-        exit()
-        if i == 3:
-            exit()
+
         opt_state = self.opt_update(i, gradients, opt_state)
+
         return loss, opt_state, averages
     
     # Optimize parameters in a loop
@@ -261,7 +259,7 @@ class SpIN:
             
             
     # Evaluates predictions at test points  
-    #@partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def eigenpairs(self, params, inputs, averages, beta):
         outputs, _ = self.evaluate_spin(params, inputs, averages, beta)
         u, choli, _, rq, _ = outputs

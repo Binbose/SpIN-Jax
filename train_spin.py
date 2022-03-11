@@ -22,11 +22,11 @@ from pathlib import Path
 from flax.training import checkpoints
 from jax import jit
 from jax.config import config
-
-config.update("jax_debug_nans", True)
+#config.update("jax_enable_x64", True)
+#config.update("jax_debug_nans", True)
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
-    model = EigenNet(features=n_dense_neurons + [n_eigenfuncs], D=D_max)
+    model = EigenNet(features=n_dense_neurons + [n_eigenfuncs], D_min=D_min, D_max=D_max)
     batch = jnp.ones((batch_size, n_space_dimension))
     weight_dict = model.init(init_rng, batch)
     layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
@@ -46,21 +46,21 @@ def get_network_as_function_of_weights(model_apply, batch):
 
 # This jit seems not making any difference
 def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta):
-    sigma_t_hat = jnp.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
-    pi_t_hat = jnp.mean(h_u[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
+    sigma_t_hat = np.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
+    pi_t_hat = np.mean(h_u[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
 
     sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=moving_average_beta)
 
-    L = jnp.linalg.cholesky(sigma_t_bar)
-    L_inv = jnp.linalg.inv(L)
+    L = np.linalg.cholesky(sigma_t_bar)
+    L_inv = np.linalg.inv(L)
     L_inv_T = L_inv.T
-    L_diag_inv = jnp.eye(L.shape[0]) * (1/jnp.diag(L))
+    L_diag_inv = np.eye(L.shape[0]) * (1/jnp.diag(L))
 
     A_1 = L_inv_T @ L_diag_inv
     A_1 = h_u @ A_1
 
     Lambda = L_inv @ pi_t_hat @ L_inv_T
-    A_2 = L_inv_T @ jnp.triu(Lambda @ L_diag_inv)
+    A_2 = L_inv_T @ np.triu(Lambda @ L_diag_inv)
     A_2 = pred @ A_2
 
     for key in del_u_del_weights['params'].keys():
@@ -78,7 +78,7 @@ def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_
     return FrozenDict(del_u_del_weights), Lambda, L_inv
 
 
-def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
+def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta, epoch):
     u_of_x = get_network_as_function_of_input(model_apply_jitted, weight_dict)
     u_of_w = get_network_as_function_of_weights(model_apply_jitted, batch)
 
@@ -88,8 +88,6 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
 
     h_u = hamiltonian_operator(model_apply_jitted, u_of_x, batch, weight_dict, fn_x=pred, system=system, nummerical_diff=False, eps=0.01)
     masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
-    print(masked_gradient['params']['Dense_0']['kernel'])
-    exit()
 
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt.update(masked_gradient, opt_state)
@@ -119,7 +117,7 @@ if __name__ == '__main__':
 
     # Optimizer
     learning_rate = 1e-5
-    decay_rate = 0.999
+    decay_rate = 0.9
     moving_average_beta = 1
 
     # Train setup
@@ -141,8 +139,8 @@ if __name__ == '__main__':
     loss = []
     energies = []
 
-    #model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
-    model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
+    model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
+    #model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
 
     if Path(save_dir).is_dir():
         weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
@@ -152,15 +150,19 @@ if __name__ == '__main__':
     weight_list = np.load('./weights.npy', allow_pickle=True)
     for i, key in enumerate(weight_dict['params'].keys()):
         w, b = weight_list[i]
-        weight_dict['params'][key]['kernel'] = w
+        print('Mean ', w.mean(), '  Var ', w.var())
+        print('Mean ', weight_dict['params'][key]['kernel'].mean(), '  Var ', weight_dict['params'][key]['kernel'].var())
+        print()
+        #weight_dict['params'][key]['kernel'] = w
+
 
 
     pbar = tqdm(range(start_epoch+1, start_epoch+num_epochs+1))
     for epoch in pbar:
-        #batch = jax.random.uniform(rng, minval=D_min, maxval=D_max, shape=(batch_size, n_space_dimension))
-        batch = np.load('./batch_{}.npy'.format(epoch-1))
+        batch = jax.random.uniform(rng+epoch, minval=D_min, maxval=D_max, shape=(batch_size, n_space_dimension))
+
         # Run an optimization step over a training batch
-        new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
+        new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta, epoch)
         pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
 
         '''

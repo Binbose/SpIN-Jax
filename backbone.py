@@ -11,35 +11,49 @@ from typing import Sequence
 from flax.linen import jit
 from jax import random, jit, vmap, jacfwd
 from jax.nn import sigmoid
-
+from jax.nn import initializers
 
 class EigenNet(nn.Module):
     features: Sequence[int]
-    D: int  # Dimension of the [-D,D]^2 box where we sample input x_in.
-
+    D_min: float  # Dimension of the [-D,D]^2 box where we sample input x_in.
+    D_max: float
     @nn.compact
     def __call__(self, x_in):
         if type(x_in) == tuple:
             x_in, L_inv = x_in
         else:
             L_inv = None
+        x = x_in
+        x = (x - (self.D_max - self.D_min) / 2) / ((self.D_max - self.D_min) / 2)
 
-        x = nn.Dense(self.features[0], use_bias=False)(x_in)
+
+        initilization = initializers.variance_scaling
+        x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization(self.features[0], 'fan_out', 'normal'))(x)
         x = sigmoid(x)
 
-        for feat in self.features[1:-1]:
-            x = nn.Dense(feat, use_bias=False)(x)
+        for i,feat in enumerate(self.features[1:-1]):
+            x = nn.Dense(feat, use_bias=False, kernel_init=initilization(feat, 'fan_out', 'normal'))(x)
             x = sigmoid(x)
-        x = nn.Dense(self.features[-1], use_bias=False)(x)
+        x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization(self.features[-1], 'fan_out', 'normal'))(x)
+        '''
+
+        initilization = initializers.lecun_normal
+        x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization())(x)
+        x = sigmoid(x)
+
+        for i, feat in enumerate(self.features[1:-1]):
+            x = nn.Dense(feat, use_bias=False, kernel_init=initilization())(x)
+            x = sigmoid(x)
+        x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization())(x)
+        '''
+
         # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition
         # See page 16th for more information
-
-        '''
-        d = jnp.sqrt(2 * self.D ** 2 - x_in ** 2) - self.D
+        d = jnp.sqrt(2 * ((self.D_max-self.D_min)/2) ** 2 - (x_in - (self.D_max - self.D_min)/2) ** 2) - (self.D_max - self.D_min)/2
         d = jnp.prod(d, axis=-1, keepdims=True)
         x = x * d
-        '''
 
+        '''
         mask = 0.1
         if len(x_in.shape) == 2:
             for i in range(x_in.shape[1]):
@@ -52,7 +66,9 @@ class EigenNet(nn.Module):
             x = x * mask
             x = x[0]
         else:
-            1/0
+            print('Something went wrong')
+            exit()
+        '''
 
         if L_inv is not None:
             x = jnp.einsum('ij, bj -> bi', L_inv, x)
