@@ -24,7 +24,7 @@ class EigenNet(nn.Module):
         else:
             L_inv = None
         x = x_in
-        x = (x - (self.D_max - self.D_min) / 2) / ((self.D_max - self.D_min) / 2)
+        x = (x - (self.D_max + self.D_min) / 2) / jnp.max(self.D_max - self.D_min)
 
 
         initilization = initializers.variance_scaling
@@ -51,7 +51,6 @@ class EigenNet(nn.Module):
         # See page 16th for more information
 
         d = jnp.sqrt(2 * (self.D_max - (self.D_max + self.D_min) / 2) ** 2 - (x_in - (self.D_max + self.D_min) / 2) ** 2) - (self.D_max - (self.D_max + self.D_min) / 2)
-        #d = jnp.sqrt(2 * ((self.D_max-self.D_min)/2) ** 2 - (x_in - (self.D_max - self.D_min)/2) ** 2) - (self.D_max - self.D_min)/2
         d = jnp.prod(d, axis=-1, keepdims=True)
         x = x * d
 

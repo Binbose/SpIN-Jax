@@ -1,12 +1,6 @@
-from time import sleep
 import jax
 import jax.numpy as jnp                # JAX NumPy
-import matplotlib.pyplot as plt
 from jax import grad, jacfwd, jacrev
-
-from flax import linen as nn           # The Linen API
-# Useful dataclass to keep train weight_dict
-from flax.training import train_state
 
 import numpy as np                     # Ordinary NumPy
 import optax                           # Optimizers
@@ -100,18 +94,12 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
 
 
 if __name__ == '__main__':
-    def mask1(D_min, D_max, x_in):
-        return jnp.sqrt(2 * (D_max - (D_max + D_min) / 2) ** 2 - (x_in - (D_max + D_min) / 2) ** 2) - (D_max - (D_max + D_min) / 2)
-
-    def mask2(D_max, D_min, x_in):
-        return jnp.sqrt(2 * ((D_max-D_min)/2) ** 2 - (x_in - (D_max - D_min)/2) ** 2) - (D_max - D_min)/2
-
     rng = jax.random.PRNGKey(1)
     rng, init_rng = jax.random.split(rng)
 
     # Problem definition
-    #system = 'hydrogen'
-    system = 'laplace'
+    system = 'hydrogen'
+    #system = 'laplace'
     n_space_dimension = 2
 
     # Hyperparameter
@@ -132,8 +120,6 @@ if __name__ == '__main__':
     save_dir = './results/{}_{}d'.format(system, n_space_dimension)
 
     # Simulation size
-    #D_min = 0
-    #D_max = np.pi
     D_min = -25
     D_max = 25
 
