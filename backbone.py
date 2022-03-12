@@ -17,6 +17,7 @@ class EigenNet(nn.Module):
     features: Sequence[int]
     D_min: float  # Dimension of the [-D,D]^2 box where we sample input x_in.
     D_max: float
+    mask_type: bool = 'quadratic'
     @nn.compact
     def __call__(self, x_in):
         if type(x_in) == tuple:
@@ -24,7 +25,7 @@ class EigenNet(nn.Module):
         else:
             L_inv = None
         x = x_in
-        x = (x - (self.D_max + self.D_min) / 2) / jnp.max(self.D_max - self.D_min)
+        x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
 
 
         initilization = initializers.variance_scaling
@@ -50,26 +51,19 @@ class EigenNet(nn.Module):
         # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition
         # See page 16th for more information
 
-        d = jnp.sqrt(2 * (self.D_max - (self.D_max + self.D_min) / 2) ** 2 - (x_in - (self.D_max + self.D_min) / 2) ** 2) - (self.D_max - (self.D_max + self.D_min) / 2)
-        d = jnp.prod(d, axis=-1, keepdims=True)
-        x = x * d
-
-        '''
-        mask = 0.1
-        if len(x_in.shape) == 2:
-            for i in range(x_in.shape[1]):
-                mask *= jnp.maximum((-x_in[:, i] ** 2 + np.pi * x_in[:, i]), 0)
-            mask = jnp.expand_dims(mask, -1)
-            x = x*mask
-        elif len(x_in.shape) == 1:
-            mask *= jnp.maximum((-x_in ** 2 + np.pi * x_in), 0)
-            mask = jnp.expand_dims(mask, -1)
-            x = x * mask
-            x = x[0]
-        else:
-            print('Something went wrong')
-            exit()
-        '''
+        if self.mask_type == 'quadratic':
+            d = jnp.sqrt(2 * (self.D_max - (self.D_max + self.D_min) / 2) ** 2 - (x_in - (self.D_max + self.D_min) / 2) ** 2) - (self.D_max - (self.D_max + self.D_min) / 2)
+            d = jnp.prod(d, axis=-1, keepdims=True)
+            x = x * d
+        elif self.mask_type == 'exp':
+            k = x_in.shape[-1]
+            #embedding = jnp.abs(nn.Embed(1,1)(jnp.eye(1, dtype='int32')))
+            #sigma = (embedding * jnp.eye(k))
+            sigma = jnp.max(jnp.array([self.D_max, self.D_min]))
+            normalization = 1 / jnp.sqrt((2*jnp.pi)**k * sigma**k)
+            d = normalization * jnp.exp(-0.5 * jnp.linalg.norm(x_in, axis=-1)**2 / sigma)
+            d = jnp.expand_dims(d, axis=-1)
+            x = x * d
 
         if L_inv is not None:
             x = jnp.einsum('ij, bj -> bi', L_inv, x)

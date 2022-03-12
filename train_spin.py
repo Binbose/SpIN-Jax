@@ -16,7 +16,7 @@ from pathlib import Path
 from flax.training import checkpoints
 from jax import jit
 from jax.config import config
-#config.update("jax_enable_x64", True)
+config.update("jax_enable_x64", True)
 #config.update("jax_debug_nans", True)
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
@@ -79,8 +79,7 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
     pred = u_of_x(batch)
     del_u_del_weights = jacrev(u_of_w)(weight_dict)
 
-
-    h_u = hamiltonian_operator(model_apply_jitted, u_of_x, batch, weight_dict, fn_x=pred, system=system, nummerical_diff=False, eps=0.01)
+    h_u = hamiltonian_operator(u_of_x, batch, fn_x=pred, system=system, nummerical_diff=True, eps=0.1)
     masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
 
     weight_dict = FrozenDict(weight_dict)
@@ -115,13 +114,13 @@ if __name__ == '__main__':
     moving_average_beta = 1
 
     # Train setup
-    num_epochs = 20000
-    batch_size = 128
+    num_epochs = 100000
+    batch_size = 512
     save_dir = './results/{}_{}d'.format(system, n_space_dimension)
 
     # Simulation size
-    D_min = -25
-    D_max = 25
+    D_min = -6
+    D_max = 6
 
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
