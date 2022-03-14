@@ -24,7 +24,7 @@ class EigenNet(nn.Module):
     features: Sequence[int]
     D_min: float  # Dimension of the [-D,D]^2 box where we sample input x_in.
     D_max: float
-    mask_type = 'exp' #'quadratic'
+    mask_type = 'quadratic'
     @nn.compact
     def __call__(self, x_in):
         if type(x_in) == tuple:
@@ -67,15 +67,14 @@ class EigenNet(nn.Module):
             # Mask with gaussian instead to satisfy boundary condition \psi(x) -> 0 for x -> \infty
             # Standard deviation of gaussian is learnable
             mean = (self.D_max + self.D_min) / 2
-            sigma = jnp.max(jnp.array([self.D_max, self.D_min]))
-            k = x_in.shape[-1]
+            sigma = jnp.max(jnp.array([self.D_max, self.D_min])) / 4
 
-            embedding = jnp.abs(nn.Embed(1, self.features[-1], embedding_init=constant(sigma))(jnp.eye(1, dtype='int32')))
-            sigma = (embedding * jnp.eye(k))[0]
+            #embedding = jnp.abs(nn.Embed(1, self.features[-1], embedding_init=constant(sigma))(jnp.eye(1, dtype='int32')))
+            #sigma = (embedding * jnp.eye(k))[0]
+            #print(embedding)
 
-            normalization = 1 / jnp.sqrt((2*jnp.pi)**k * sigma**k)
-            d = normalization * jnp.exp(-0.5 * jnp.linalg.norm((x_in-mean), axis=-1, keepdims=True)**2 / sigma)
-            #d = jnp.expand_dims(d, axis=-1)
+            normalization = 1 / (jnp.sqrt(2*jnp.pi) * sigma)
+            d = normalization * jnp.exp(-0.5 * jnp.linalg.norm(x_in-mean, axis=-1, keepdims=True)**2 / sigma**2)
             x = x * d
 
         if L_inv is not None:
@@ -94,23 +93,22 @@ class EigenNet(nn.Module):
 
         ii_in_any_bound = None
         jj_in_any_bound = None
-        beta = (L - l + 1) / L
-        for k in range(sparsifing_K):
-            alpha = k/(sparsifing_K - 1) * (l - 1)/L
+        beta_0 = (l - 1)/L
+        beta_1 = (L - l + 1) / L
+        for k in range(1, sparsifing_K):
+            alpha = (k-1)/(sparsifing_K-1) * beta_0
 
             lower_bound_input = alpha * m
-            upper_bound_input = (alpha + beta) * m
+            upper_bound_input = (alpha + beta_1) * m
             lower_bound_output = alpha * n
-            upper_bound_output = (alpha + beta) * n
+            upper_bound_output = (alpha + beta_1) * n
 
             ii_is_greater_than_lower_bound = ii >= lower_bound_input
             ii_is_smaller_than_upper_bound = ii <= upper_bound_input
-            ii_in_bound = np.logical_and(
-                ii_is_greater_than_lower_bound, ii_is_smaller_than_upper_bound)
+            ii_in_bound = np.logical_and(ii_is_greater_than_lower_bound, ii_is_smaller_than_upper_bound)
             jj_is_greater_than_lower_bound = jj >= lower_bound_output
             jj_is_smaller_than_upper_bound = jj <= upper_bound_output
-            jj_in_bound = np.logical_and(
-                jj_is_greater_than_lower_bound, jj_is_smaller_than_upper_bound)
+            jj_in_bound = np.logical_and(jj_is_greater_than_lower_bound, jj_is_smaller_than_upper_bound)
 
             if ii_in_any_bound is None:
                 ii_in_any_bound = ii_in_bound
@@ -119,8 +117,8 @@ class EigenNet(nn.Module):
                 ii_in_any_bound = np.logical_or(ii_in_any_bound, ii_in_bound)
                 jj_in_any_bound = np.logical_or(jj_in_any_bound, jj_in_bound)
 
-        layer_sparsifing_mask = np.logical_and(
-            ii_in_any_bound, jj_in_any_bound)
+        layer_sparsifing_mask = np.logical_and(ii_in_any_bound, jj_in_any_bound)
+        print(layer_sparsifing_mask)
         return layer_sparsifing_mask
 
     @staticmethod
