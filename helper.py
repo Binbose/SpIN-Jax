@@ -23,28 +23,6 @@ def get_hessian_diagonals(fn, x):
     return vectorized_diagonal(vectorized_hessian_result).reshape(batch, n_eigenfunc, -1)
 
 
-
-def get_hessian_diagonals_2(fn, params, x):
-    '''
-    def second_derivative(x):
-        second_derivatice = jacfwd(jacfwd(fn))(x)
-        return second_derivatice
-
-    vec_second_derivative = vmap(second_derivative, in_axes=(None, 0))
-    laplacian = vec_second_derivative(fn)(x)
-    return laplacian
-    '''
-
-    def action(params, inputs):
-        u_xx = jacfwd(jacfwd(fn, 1), 1)(params, inputs)
-        return u_xx
-
-    vec_fun = vmap(action, in_axes=(None, 0))
-    laplacian = vec_fun(params, x)
-
-    return np.squeeze(laplacian)
-
-
 def moving_average(running_average, new_data, beta):
     return running_average - beta*(running_average - new_data)
 

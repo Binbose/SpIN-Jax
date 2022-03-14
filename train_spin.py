@@ -19,7 +19,7 @@ from jax.config import config
 
 import matplotlib.pyplot as plt
 
-#config.update("jax_enable_x64", True)
+config.update("jax_enable_x64", True)
 #config.update("jax_debug_nans", True)
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
@@ -33,13 +33,25 @@ def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, 
     opt_state = opt.init(weight_dict)
     return model, weight_dict, opt, opt_state, layer_sparsifying_masks
 
-
 def get_network_as_function_of_input(model_apply, params):
     return lambda batch: model_apply(params, batch)
 
-
 def get_network_as_function_of_weights(model_apply, batch):
     return lambda weights: model_apply(weights, batch)
+
+def get_masked_gradient_function(A_1, A_2):
+    def _calculate_masked_gradient(del_u_del_weights, j_sigma_t_bar, A_1, A_2):
+        j_pi_t_hat = jnp.einsum('bj, bjcw -> bcw', A_1, del_u_del_weights)
+        j_pi_t_hat = jnp.mean(j_pi_t_hat, axis=0)
+
+        j_sigma_t_hat = jnp.einsum('bj, bjcw -> bcw', A_2, del_u_del_weights)
+        j_sigma_t_hat = jnp.mean(j_sigma_t_hat, axis=0)
+        j_sigma_t_bar = moving_average(j_sigma_t_bar, j_sigma_t_hat, moving_average_beta)
+
+        masked_grad = -(j_pi_t_hat - j_sigma_t_bar)
+        return masked_grad
+
+    return lambda del_u_del_weights, j_sigma_t_bar: _calculate_masked_gradient(del_u_del_weights, j_sigma_t_bar, A_1, A_2)
 
 # This jit seems not making any difference
 def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta):
@@ -60,30 +72,20 @@ def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_
     A_2 = L_inv_T @ np.triu(Lambda @ L_diag_inv)
     A_2 = pred @ A_2
 
-    for key in del_u_del_weights['params'].keys():
-        j_pi_t_hat = jnp.einsum('bj, bjcw -> bcw', A_1,del_u_del_weights['params'][key]['kernel'])
-        j_pi_t_hat = jnp.mean(j_pi_t_hat, axis=0)
-
-        j_sigma_t_hat = jnp.einsum('bj, bjcw -> bcw', A_2,  del_u_del_weights['params'][key]['kernel'])
-        j_sigma_t_hat = jnp.mean(j_sigma_t_hat, axis=0)
-        j_sigma_t_bar[key] = moving_average(j_sigma_t_bar[key], j_sigma_t_hat, moving_average_beta)
-
-        masked_grad = -(j_pi_t_hat - j_sigma_t_bar[key])
-        del_u_del_weights['params'][key]['kernel'] = masked_grad
-
+    masked_gradient_function = get_masked_gradient_function(A_1, A_2)
+    del_u_del_weights = jax.tree_multimap(masked_gradient_function, del_u_del_weights, j_sigma_t_bar)
 
     return FrozenDict(del_u_del_weights), Lambda, L_inv
 
 
-def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta, epoch):
+def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
     u_of_x = get_network_as_function_of_input(model_apply_jitted, weight_dict)
     u_of_w = get_network_as_function_of_weights(model_apply_jitted, batch)
 
     pred = u_of_x(batch)
     del_u_del_weights = jacrev(u_of_w)(weight_dict)
 
-
-    h_u = hamiltonian_operator(model_apply_jitted, u_of_x, batch, weight_dict, fn_x=pred, system=system, nummerical_diff=False, eps=0.01)
+    h_u = hamiltonian_operator(u_of_x, batch, fn_x=pred, system=system, nummerical_diff=False, eps=0.1)
     masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
 
     weight_dict = FrozenDict(weight_dict)
@@ -100,13 +102,12 @@ if __name__ == '__main__':
     rng = jax.random.PRNGKey(1)
     rng, init_rng = jax.random.split(rng)
 
-    # Problem definition
-    # system = 'hydrogen'
-    system = 'laplace'
-    n_space_dimension = 2
-    charge = 1
-
     # Hyperparameter
+    # Problem definition
+    #system = 'hydrogen'
+    system = 'laplace'
+    n_space_dimension = 1
+
     # Network parameter
     sparsifying_K = 3
     n_dense_neurons = [64, 64, 64, 32]
@@ -124,20 +125,21 @@ if __name__ == '__main__':
     moving_average_beta = 1
 
     # Train setup
-    num_epochs = 20000
+    num_epochs = 100000
     batch_size = 128
     save_dir = './results/{}_{}d'.format(system, n_space_dimension)
 
     # Simulation size
-    D_min = -25
-    D_max = 25
+    D_min = 0
+    D_max = np.pi
 
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
     #weight_dict = weight_dict.unfreeze()
 
     sigma_t_bar = jnp.eye(n_eigenfuncs)
-    j_sigma_t_bar = {key: jnp.zeros_like(weight_dict['params'][key]['kernel']) for key in weight_dict['params'].keys()}
+    j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros_like(x), weight_dict).unfreeze()
+
     start_epoch = 0
     loss = []
     energies = []
@@ -163,7 +165,7 @@ if __name__ == '__main__':
 
         weight_dict = weight_dict.unfreeze()
         # Run an optimization step over a training batch
-        new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta, epoch)
+        new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
         pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
 
         loss.append(new_loss)
