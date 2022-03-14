@@ -13,6 +13,7 @@ from jax import random, jit, vmap, jacfwd
 from jax.nn import sigmoid
 from jax.nn import initializers
 from jax import dtypes
+import matplotlib.pyplot as plt
 
 def constant(value, dtype=jnp.float_):
   def init(key, shape, dtype=dtype):
@@ -34,7 +35,7 @@ class EigenNet(nn.Module):
         x = x_in
         x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
         activation = jax.nn.sigmoid
-
+        '''
         initilization = initializers.variance_scaling
         x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization(self.features[0], 'fan_out', 'normal'))(x)
         x = activation(x)
@@ -45,6 +46,7 @@ class EigenNet(nn.Module):
         x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization(self.features[-1], 'fan_out', 'normal'))(x)
 
         '''
+        activation = jax.nn.celu
         initilization = initializers.he_normal
         x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization())(x)
         x = activation(x)
@@ -53,8 +55,6 @@ class EigenNet(nn.Module):
             x = nn.Dense(feat, use_bias=False, kernel_init=initilization())(x)
             x = activation(x)
         x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization())(x)
-        '''
-
 
 
         if self.mask_type == 'quadratic':
@@ -84,6 +84,7 @@ class EigenNet(nn.Module):
 
     @staticmethod
     def get_layer_sparsifying_mask(W, sparsifing_K, l, L):
+        l += 1
         m = W.shape[0]
         n = W.shape[1]
 
@@ -91,11 +92,10 @@ class EigenNet(nn.Module):
         y = np.linspace(0, n-1, n)
         ii, jj = np.meshgrid(x, y, indexing='ij')
 
-        ii_in_any_bound = None
-        jj_in_any_bound = None
+        layer_sparsifing_mask = None
         beta_0 = (l - 1)/L
         beta_1 = (L - l + 1) / L
-        for k in range(1, sparsifing_K):
+        for k in range(1, sparsifing_K+1):
             alpha = (k-1)/(sparsifing_K-1) * beta_0
 
             lower_bound_input = alpha * m
@@ -106,19 +106,18 @@ class EigenNet(nn.Module):
             ii_is_greater_than_lower_bound = ii >= lower_bound_input
             ii_is_smaller_than_upper_bound = ii <= upper_bound_input
             ii_in_bound = np.logical_and(ii_is_greater_than_lower_bound, ii_is_smaller_than_upper_bound)
+
             jj_is_greater_than_lower_bound = jj >= lower_bound_output
             jj_is_smaller_than_upper_bound = jj <= upper_bound_output
             jj_in_bound = np.logical_and(jj_is_greater_than_lower_bound, jj_is_smaller_than_upper_bound)
 
-            if ii_in_any_bound is None:
-                ii_in_any_bound = ii_in_bound
-                jj_in_any_bound = jj_in_bound
+            if layer_sparsifing_mask is None:
+                layer_sparsifing_mask = np.logical_and(ii_in_bound, jj_in_bound)
             else:
-                ii_in_any_bound = np.logical_or(ii_in_any_bound, ii_in_bound)
-                jj_in_any_bound = np.logical_or(jj_in_any_bound, jj_in_bound)
+                layer_sparsifing_mask_ = np.logical_and(ii_in_bound, jj_in_bound)
+                layer_sparsifing_mask = np.logical_or(layer_sparsifing_mask, layer_sparsifing_mask_)
 
-        layer_sparsifing_mask = np.logical_and(ii_in_any_bound, jj_in_any_bound)
-        print(layer_sparsifing_mask)
+
         return layer_sparsifing_mask
 
     @staticmethod
