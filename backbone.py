@@ -12,12 +12,19 @@ from flax.linen import jit
 from jax import random, jit, vmap, jacfwd
 from jax.nn import sigmoid
 from jax.nn import initializers
+from jax import dtypes
+
+def constant(value, dtype=jnp.float_):
+  def init(key, shape, dtype=dtype):
+    dtype = dtypes.canonicalize_dtype(dtype)
+    return jnp.ones(shape, dtypes.canonicalize_dtype(dtype)) * value
+  return init
 
 class EigenNet(nn.Module):
     features: Sequence[int]
     D_min: float  # Dimension of the [-D,D]^2 box where we sample input x_in.
     D_max: float
-    mask_type: bool = 'quadratic'
+    mask_type = 'exp' #'quadratic'
     @nn.compact
     def __call__(self, x_in):
         if type(x_in) == tuple:
@@ -26,43 +33,49 @@ class EigenNet(nn.Module):
             L_inv = None
         x = x_in
         x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
-
+        activation = jax.nn.sigmoid
 
         initilization = initializers.variance_scaling
         x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization(self.features[0], 'fan_out', 'normal'))(x)
-        x = sigmoid(x)
+        x = activation(x)
 
         for i,feat in enumerate(self.features[1:-1]):
             x = nn.Dense(feat, use_bias=False, kernel_init=initilization(feat, 'fan_out', 'normal'))(x)
-            x = sigmoid(x)
+            x = activation(x)
         x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization(self.features[-1], 'fan_out', 'normal'))(x)
 
         '''
-        initilization = initializers.lecun_normal
+        initilization = initializers.he_normal
         x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization())(x)
-        x = sigmoid(x)
+        x = activation(x)
 
         for i, feat in enumerate(self.features[1:-1]):
             x = nn.Dense(feat, use_bias=False, kernel_init=initilization())(x)
-            x = sigmoid(x)
+            x = activation(x)
         x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization())(x)
         '''
 
-        # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition
-        # See page 16th for more information
+
 
         if self.mask_type == 'quadratic':
+            # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition \psi(D_max) = 0 and \psi(D_min) = 0
+            # See page 16th for more information
             d = jnp.sqrt(2 * (self.D_max - (self.D_max + self.D_min) / 2) ** 2 - (x_in - (self.D_max + self.D_min) / 2) ** 2) - (self.D_max - (self.D_max + self.D_min) / 2)
             d = jnp.prod(d, axis=-1, keepdims=True)
             x = x * d
         elif self.mask_type == 'exp':
-            k = x_in.shape[-1]
-            #embedding = jnp.abs(nn.Embed(1,1)(jnp.eye(1, dtype='int32')))
-            #sigma = (embedding * jnp.eye(k))
+            # Mask with gaussian instead to satisfy boundary condition \psi(x) -> 0 for x -> \infty
+            # Standard deviation of gaussian is learnable
+            mean = (self.D_max + self.D_min) / 2
             sigma = jnp.max(jnp.array([self.D_max, self.D_min]))
+            k = x_in.shape[-1]
+
+            embedding = jnp.abs(nn.Embed(1, self.features[-1], embedding_init=constant(sigma))(jnp.eye(1, dtype='int32')))
+            sigma = (embedding * jnp.eye(k))[0]
+
             normalization = 1 / jnp.sqrt((2*jnp.pi)**k * sigma**k)
-            d = normalization * jnp.exp(-0.5 * jnp.linalg.norm(x_in, axis=-1)**2 / sigma)
-            d = jnp.expand_dims(d, axis=-1)
+            d = normalization * jnp.exp(-0.5 * jnp.linalg.norm((x_in-mean), axis=-1, keepdims=True)**2 / sigma)
+            #d = jnp.expand_dims(d, axis=-1)
             x = x * d
 
         if L_inv is not None:
@@ -119,28 +132,11 @@ class EigenNet(nn.Module):
     def sparsify_weights(weight_dict, layer_sparsifying_masks):
         weight_dict = weight_dict.unfreeze()
         for key, sparsifying_layer_mask in zip(weight_dict['params'].keys(), layer_sparsifying_masks):
-            weight_dict['params'][key]['kernel'] = weight_dict['params'][key]['kernel'] * \
-                sparsifying_layer_mask
+            weight_dict['params'][key]['kernel'] = weight_dict['params'][key]['kernel'] * sparsifying_layer_mask
 
         weight_dict = FrozenDict(weight_dict)
         return weight_dict
 
-
-def apply_mask(self, inputs, outputs):
-    # mask is used to zero the boundary points.
-    mask = 0.1
-    if len(inputs.shape) == 2:
-        for i in range(inputs.shape[1]):
-            mask *= np.maximum((-inputs[:, i] ** 2 + np.pi * inputs[:, i]), 0)
-        mask = np.expand_dims(mask, -1)
-
-    elif len(inputs.shape) == 1:
-        for x in inputs:
-            mask *= np.maximum((-x ** 2 + np.pi * x), 0)
-
-    return mask * outputs
-
-#def get_model_apply()
 
 if __name__ == '__main__':
     D = 50
