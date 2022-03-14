@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 import numpy as np
-from helper import get_hessian_diagonals, get_hessian_diagonals_2
+from helper import get_hessian_diagonals
 import time
 import jax
 
