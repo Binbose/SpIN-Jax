@@ -105,7 +105,7 @@ if __name__ == '__main__':
     # Network parameter
     sparsifying_K = 3
     n_dense_neurons = [64, 64, 64, 32]
-    n_eigenfuncs = 4
+    n_eigenfuncs = 9
 
 
     # Optimizer
@@ -119,8 +119,8 @@ if __name__ == '__main__':
     save_dir = './results/{}_{}d'.format(system, n_space_dimension)
 
     # Simulation size
-    D_min = -6
-    D_max = 6
+    D_min = -25
+    D_max = 25
 
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
