@@ -16,6 +16,9 @@ from pathlib import Path
 from flax.training import checkpoints
 from jax import jit
 from jax.config import config
+
+import matplotlib.pyplot as plt
+
 #config.update("jax_enable_x64", True)
 #config.update("jax_debug_nans", True)
 
@@ -98,9 +101,10 @@ if __name__ == '__main__':
     rng, init_rng = jax.random.split(rng)
 
     # Problem definition
-    system = 'hydrogen'
-    #system = 'laplace'
+    # system = 'hydrogen'
+    system = 'laplace'
     n_space_dimension = 2
+    charge = 1
 
     # Hyperparameter
     # Network parameter
@@ -108,6 +112,11 @@ if __name__ == '__main__':
     n_dense_neurons = [64, 64, 64, 32]
     n_eigenfuncs = 4
 
+    # Turn on/off real time plotting
+    realtime_plots = True
+    npts = 64
+    log_every = 200
+    window = log_every
 
     # Optimizer
     learning_rate = 1e-5
@@ -140,6 +149,10 @@ if __name__ == '__main__':
         weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
         loss, energies = np.load('{}/loss.npy'.format(save_dir)).tolist(), np.load('{}/energies.npy'.format(save_dir)).tolist()
 
+    if realtime_plots:
+        plt.ion()
+        plots = helper.create_plots(n_space_dimension, n_eigenfuncs)
+
     pbar = tqdm(range(start_epoch+1, start_epoch+num_epochs+1))
     for epoch in pbar:
         batch = jax.random.uniform(rng+epoch, minval=D_min, maxval=D_max, shape=(batch_size, n_space_dimension))
@@ -153,14 +166,12 @@ if __name__ == '__main__':
         new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta, epoch)
         pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
 
-
-
         loss.append(new_loss)
         energies.append(new_energies)
 
-
-        if epoch % 1000 == 0:
-            helper.create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv)
+        if epoch % log_every == 0:
+            helper.create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv, window, *plots)
+            plt.pause(.01)
 
 
 

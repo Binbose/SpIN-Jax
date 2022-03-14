@@ -7,7 +7,7 @@ import jax
 def get_hydrogen_potential():
 
     def hygrogen_potential(x):
-        return 1/jnp.linalg.norm(x, axis=-1)
+        return -1/jnp.linalg.norm(x, axis=-1)
 
     return hygrogen_potential
 

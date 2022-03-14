@@ -50,7 +50,7 @@ def moving_average(running_average, new_data, beta):
 
 
 
-def plot_output(model, weight_dict, D_min, D_max, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100, save_dir=None):
+def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100, save_dir=None):
 
     if n_space_dimension == 1:
         x = np.linspace(D_min,D_max, N)[:,None]
@@ -61,7 +61,7 @@ def plot_output(model, weight_dict, D_min, D_max, n_eigenfunc=0, L_inv=None, n_s
             z = model.apply(weight_dict, x)[:, n_eigenfunc]
         z_min, z_max = -np.abs(z).max(), np.abs(z).max()
 
-        plt.plot(x,z)
+        ax.plot(x,z)
 
     elif n_space_dimension == 2:
         # generate 2 2d grids for the x & y bounds
@@ -75,13 +75,11 @@ def plot_output(model, weight_dict, D_min, D_max, n_eigenfunc=0, L_inv=None, n_s
             z = model.apply(weight_dict, coordinates)[:, n_eigenfunc].reshape(N, N)
         z_min, z_max = -np.abs(z).max(), np.abs(z).max()
 
-        fig, ax = plt.subplots()
 
         c = ax.pcolormesh(x, y, z, cmap='RdBu', vmin=z_min, vmax=z_max)
         ax.set_title('Eigenfunction {}'.format(n_eigenfunc))
         # set the limits of the plot to the limits of the data
         ax.axis([x.min(), x.max(), y.min(), y.max()])
-        fig.colorbar(c, ax=ax)
 
 
     if save_dir is None:
@@ -89,38 +87,72 @@ def plot_output(model, weight_dict, D_min, D_max, n_eigenfunc=0, L_inv=None, n_s
     else:
         Path(save_dir).mkdir(parents=True, exist_ok=True)
         plt.savefig('{}/eigenfunc_{}'.format(save_dir, n_eigenfunc))
-        plt.close()
 
+def create_plots(n_space_dimension, neig):
+    energies_fig, energies_ax = plt.subplots(1, 1)
+    if n_space_dimension == 1:
+        fig, ax = plt.subplots(1, 1)
+        return fig, ax, energies_fig, energies_ax
+    elif n_space_dimension == 2:
+        nfig = max(2, int(np.ceil(np.sqrt(neig))))
+        psi_fig, psi_ax = plt.subplots(nfig, nfig, figsize=(10, 10))
+        for ax in psi_ax.flatten():
+            ax.set_aspect('equal', adjustable='box')
+        return psi_fig, psi_ax, energies_fig, energies_ax
 
-def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv):
+def uniform_sliding_average(data, window):
+    ret = np.cumsum(data, dtype=float)
+    ret[window:] = ret[window:] - ret[:-window]
+    return ret[window - 1:] / window
+
+def uniform_sliding_stdev(data, window):
+    shape = data.shape[:-1] + (data.shape[-1] - window + 1, window)
+    strides = data.strides + (data.strides[-1],)
+    rolling = np.lib.stride_tricks.as_strided(data, shape=shape, strides=strides)
+    return np.std(rolling, 1)
+
+def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv, window, psi_fig, psi_ax, energies_fig, energies_ax):
     checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir), (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
     np.save('{}/loss'.format(save_dir), loss), np.save('{}/energies'.format(save_dir), energies)
 
+    if n_space_dimension == 1:
+        psi_ax.cla()
     for i in range(n_eigenfuncs):
-        plot_output(model, weight_dict, D_min, D_max, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension,
+        if n_space_dimension == 2:
+            psi_ax = psi_ax.flatten()[i]
+        plot_output(model, weight_dict, D_min, D_max, psi_fig, psi_ax, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension,
                            N=100, save_dir='{}/eigenfunctions/epoch_{}'.format(save_dir, epoch))
 
     energies_array = np.array(energies)
     Path(save_dir).mkdir(parents=True, exist_ok=True)
+    energies_ax.cla()
+    window = 100
+    color = plt.cm.tab10(np.arange(n_eigenfuncs))
+    for i, c in zip(range(n_eigenfuncs), color):
+        x = np.arange(window//2 - 1, len(energies_array[:, i])-(window//2))
+        av = uniform_sliding_average(energies_array[:, i], window)
+        stdev = uniform_sliding_stdev(energies_array[:, i], window)
+        energies_ax.plot(x, av, c=c, label='Eigenvalue {}'.format(i))
+        energies_ax.fill_between(x, av-stdev/2, av+stdev/2, color=c, alpha=.5)
+    energies_ax.legend()
+    energies_fig.savefig('{}/energies'.format(save_dir, save_dir))
+
+    fig, ax = plt.subplots()
     for i in range(n_eigenfuncs):
-        plt.plot(energies_array[:, i], label='Eigenvalue {}'.format(i), )
-    plt.legend()
-    plt.savefig('{}/energies'.format(save_dir, save_dir))
-    plt.close()
+        ax.plot(energies_array[-500:, i], label='Eigenvalue {}'.format(i))
+    ax.legend()
+    fig.savefig('{}/energies_newest'.format(save_dir, save_dir))
+    plt.close(fig)
 
-    for i in range(n_eigenfuncs):
-        plt.plot(energies_array[-500:, i], label='Eigenvalue {}'.format(i))
-    plt.legend()
-    plt.savefig('{}/energies_newest'.format(save_dir, save_dir))
-    plt.close()
+    fig, ax = plt.subplots()
+    ax.plot(loss)
+    fig.savefig('{}/loss'.format(save_dir))
+    plt.close(fig)
 
-    plt.plot(loss)
-    plt.savefig('{}/loss'.format(save_dir))
-    plt.close()
-
-    plt.plot(loss[-500:])
-    plt.savefig('{}/loss_newest'.format(save_dir))
-    plt.close()
+    fig, ax = plt.subplots()
+    ax.plot(loss[-500:])
+    fig.savefig('{}/loss_newest'.format(save_dir))
+    plt.close(fig)
 
     np.save('{}/loss'.format(save_dir), loss)
     np.save('{}/energies'.format(save_dir), energies)
