@@ -23,7 +23,8 @@ def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, 
     model = EigenNet(features=n_dense_neurons + [n_eigenfuncs], D_min=D_min, D_max=D_max)
     batch = jnp.ones((batch_size, n_space_dimension))
     weight_dict = model.init(init_rng, batch)
-    layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
+    layer_sparsifying_masks = None#EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
+    #exit()
 
     """Creates initial `TrainState`."""
     opt = optax.rmsprop(learning_rate, decay_rate)
@@ -54,6 +55,9 @@ def get_masked_gradient_function(A_1, A_2):
 def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta):
     sigma_t_hat = np.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
     pi_t_hat = np.mean(h_u[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
+
+    #print(np.linalg.eigvals(sigma_t_hat))
+    #exit()
 
     sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=moving_average_beta)
 
@@ -106,7 +110,7 @@ if __name__ == '__main__':
     n_space_dimension = 1
 
     # Network parameter
-    sparsifying_K = 3
+    sparsifying_K = 2
     n_dense_neurons = [64, 64, 64, 32]
     n_eigenfuncs = 4
 
@@ -126,7 +130,6 @@ if __name__ == '__main__':
 
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
-    #weight_dict = weight_dict.unfreeze()
 
     sigma_t_bar = jnp.eye(n_eigenfuncs)
     j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros_like(x), weight_dict).unfreeze()
@@ -146,15 +149,16 @@ if __name__ == '__main__':
     for epoch in pbar:
         batch = jax.random.uniform(rng+epoch, minval=D_min, maxval=D_max, shape=(batch_size, n_space_dimension))
 
-
-        #weight_dict = EigenNet.sparsify_weights(
-        #    weight_dict, layer_sparsifying_masks)
+        #print(layer_sparsifying_masks)
+        #exit()
+        #weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
+        #print(weight_dict['params'])
+        #exit()
 
         weight_dict = weight_dict.unfreeze()
         # Run an optimization step over a training batch
         new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
         pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
-
 
 
         loss.append(new_loss)
