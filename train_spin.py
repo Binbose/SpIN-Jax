@@ -109,7 +109,7 @@ if __name__ == '__main__':
     n_space_dimension = 1
 
     # Network parameter
-    sparsifying_K = 3
+    sparsifying_K = 5
     n_dense_neurons = [64, 64, 64, 32]
     n_eigenfuncs = 4
 
@@ -135,11 +135,10 @@ if __name__ == '__main__':
 
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
-    #weight_dict = weight_dict.unfreeze()
+
 
     sigma_t_bar = jnp.eye(n_eigenfuncs)
     j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros_like(x), weight_dict).unfreeze()
-
     start_epoch = 0
     loss = []
     energies = []
@@ -159,9 +158,8 @@ if __name__ == '__main__':
     for epoch in pbar:
         batch = jax.random.uniform(rng+epoch, minval=D_min, maxval=D_max, shape=(batch_size, n_space_dimension))
 
-
-        #weight_dict = EigenNet.sparsify_weights(
-        #    weight_dict, layer_sparsifying_masks)
+        if sparsifying_K > 0:
+            weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
 
         weight_dict = weight_dict.unfreeze()
         # Run an optimization step over a training batch
