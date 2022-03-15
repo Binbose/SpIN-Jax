@@ -35,7 +35,7 @@ class EigenNet(nn.Module):
         x = x_in
         x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
         activation = jax.nn.sigmoid
-        '''
+        
         initilization = initializers.variance_scaling
         x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization(self.features[0], 'fan_out', 'normal'))(x)
         x = activation(x)
@@ -55,7 +55,7 @@ class EigenNet(nn.Module):
             x = nn.Dense(feat, use_bias=False, kernel_init=initilization())(x)
             x = activation(x)
         x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization())(x)
-
+        '''
 
         if self.mask_type == 'quadratic':
             # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition \psi(D_max) = 0 and \psi(D_min) = 0
