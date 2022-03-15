@@ -27,8 +27,7 @@ def moving_average(running_average, new_data, beta):
     return running_average - beta*(running_average - new_data)
 
 
-
-def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100, save_dir=None):
+def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100):
 
     if n_space_dimension == 1:
         x = np.linspace(D_min,D_max, N)[:,None]
@@ -59,12 +58,6 @@ def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=
         # set the limits of the plot to the limits of the data
         ax.axis([x.min(), x.max(), y.min(), y.max()])
 
-
-    if save_dir is None:
-        plt.show()
-    else:
-        Path(save_dir).mkdir(parents=True, exist_ok=True)
-        plt.savefig('{}/eigenfunc_{}'.format(save_dir, n_eigenfunc))
 
 def create_plots(n_space_dimension, neig):
     energies_fig, energies_ax = plt.subplots(1, 1)
@@ -100,8 +93,10 @@ def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimens
             ax = psi_ax.flatten()[i]
         else:
             ax = psi_ax
-        plot_output(model, weight_dict, D_min, D_max, psi_fig, ax, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension,
-                           N=100, save_dir='{}/eigenfunctions/epoch_{}'.format(save_dir, epoch))
+        plot_output(model, weight_dict, D_min, D_max, psi_fig, ax, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension, N=100)
+    eigenfunc_dir = f'{save_dir}/eigenfunctions'
+    Path(eigenfunc_dir).mkdir(parents=True, exist_ok=True)
+    psi_fig.savefig(f'{eigenfunc_dir}/epoch_{epoch}.png')
 
     energies_array = np.array(energies)
     Path(save_dir).mkdir(parents=True, exist_ok=True)

@@ -106,7 +106,7 @@ if __name__ == '__main__':
     # Problem definition
     #system = 'hydrogen'
     system = 'laplace'
-    n_space_dimension = 1
+    n_space_dimension = 2
 
     # Network parameter
     sparsifying_K = 5
@@ -132,6 +132,9 @@ if __name__ == '__main__':
     # Simulation size
     D_min = 0
     D_max = np.pi
+    if (system, n_space_dimension) == ('hydrogen', 2):
+        D_min = -20
+        D_max = 20
 
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
