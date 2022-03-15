@@ -116,7 +116,7 @@ if __name__ == '__main__':
     # Turn on/off real time plotting
     realtime_plots = True
     npts = 64
-    log_every = 200
+    log_every = 2000
     window = log_every
 
     # Optimizer

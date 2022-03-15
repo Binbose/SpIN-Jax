@@ -97,8 +97,10 @@ def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimens
         psi_ax.cla()
     for i in range(n_eigenfuncs):
         if n_space_dimension == 2:
-            psi_ax = psi_ax.flatten()[i]
-        plot_output(model, weight_dict, D_min, D_max, psi_fig, psi_ax, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension,
+            ax = psi_ax.flatten()[i]
+        else:
+            ax = psi_ax
+        plot_output(model, weight_dict, D_min, D_max, psi_fig, ax, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension,
                            N=100, save_dir='{}/eigenfunctions/epoch_{}'.format(save_dir, epoch))
 
     energies_array = np.array(energies)
