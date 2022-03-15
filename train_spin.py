@@ -127,9 +127,9 @@ if __name__ == '__main__':
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
 
+
     sigma_t_bar = jnp.eye(n_eigenfuncs)
     j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros_like(x), weight_dict).unfreeze()
-
     start_epoch = 0
     loss = []
     energies = []
