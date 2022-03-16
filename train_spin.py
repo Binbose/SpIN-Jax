@@ -39,7 +39,7 @@ def get_network_as_function_of_input(model_apply, params):
 def get_network_as_function_of_weights(model_apply, batch):
     return lambda weights: model_apply(weights, batch)
 
-def get_masked_gradient_function(A_1, A_2):
+def get_masked_gradient_function(A_1, A_2, moving_average_beta):
     def _calculate_masked_gradient(del_u_del_weights, j_sigma_t_bar, A_1, A_2):
         j_pi_t_hat = jnp.einsum('bj, bjcw -> bcw', A_1, del_u_del_weights)
         j_pi_t_hat = jnp.mean(j_pi_t_hat, axis=0)
@@ -54,7 +54,7 @@ def get_masked_gradient_function(A_1, A_2):
     return lambda del_u_del_weights, j_sigma_t_bar: _calculate_masked_gradient(del_u_del_weights, j_sigma_t_bar, A_1, A_2)
 
 # This jit seems not making any difference
-def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta):
+def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar):
     sigma_t_hat = np.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
     pi_t_hat = np.mean(h_u[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
 
@@ -72,13 +72,13 @@ def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_
     A_2 = L_inv_T @ np.triu(Lambda @ L_diag_inv)
     A_2 = pred @ A_2
 
-    masked_gradient_function = get_masked_gradient_function(A_1, A_2)
+    masked_gradient_function = get_masked_gradient_function(A_1, A_2, moving_average_beta)
     del_u_del_weights = jax.tree_multimap(masked_gradient_function, del_u_del_weights, j_sigma_t_bar)
 
     return FrozenDict(del_u_del_weights), Lambda, L_inv
 
 
-def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
+def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta, system):
     u_of_x = get_network_as_function_of_input(model_apply_jitted, weight_dict)
     u_of_w = get_network_as_function_of_weights(model_apply_jitted, batch)
 
@@ -86,7 +86,7 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
     del_u_del_weights = jacrev(u_of_w)(weight_dict)
 
     h_u = hamiltonian_operator(u_of_x, batch, fn_x=pred, system=system, nummerical_diff=False, eps=0.1)
-    masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta)
+    masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar)
 
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt.update(masked_gradient, opt_state)
@@ -97,86 +97,90 @@ def train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_b
 
     return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state
 
+class ModelTrainer:
+    def __init__(self) -> None:
+        # Hyperparameter
+        # Problem definition
+        #system = 'hydrogen'
+        self.system = 'laplace'
+        self.n_space_dimension = 2
+        self.charge = 1
 
-if __name__ == '__main__':
-    rng = jax.random.PRNGKey(1)
-    rng, init_rng = jax.random.split(rng)
+        # Network parameter
+        self.sparsifying_K = 5
+        self.n_dense_neurons = [64, 64, 64, 32]
+        self.n_eigenfuncs = 4
 
-    # Hyperparameter
-    # Problem definition
-    # system = 'laplace'
-    system = 'hydrogen'
-    n_space_dimension = 2
-    charge = 1
+        # Turn on/off real time plotting
+        self.realtime_plots = True
+        self.npts = 64
+        self.log_every = 2000
+        self.window = 100
 
-    # Simulation size
-    if system == 'laplace':
-        D_min = 0
-        D_max = np.pi
-    elif system == 'hydrogen':
-        D_min = -50
-        D_max = 50
+        # Optimizer
+        self.learning_rate = 1e-5
+        self.decay_rate = 0.9
+        self.moving_average_beta = 1
+
+        # Train setup
+        self.num_epochs = 100000
+        self.batch_size = 128
+        self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
+
+        # Simulation size
+        self.D_min = 0
+        self.D_max = np.pi
+        if (self.system, self.n_space_dimension) == ('hydrogen', 2):
+            self.D_min = -20
+            self.D_max = 20
+
+    def start_training(self):
+        rng = jax.random.PRNGKey(1)
+        rng, init_rng = jax.random.split(rng)
+        # Create initial state
+        model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(self.n_dense_neurons, self.n_eigenfuncs, self.batch_size, self.D_min, self.D_max, self.learning_rate, self.decay_rate, self.sparsifying_K, n_space_dimension=self.n_space_dimension, init_rng=init_rng)
+
+
+        sigma_t_bar = jnp.eye(self.n_eigenfuncs)
+        j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros_like(x), weight_dict).unfreeze()
+        start_epoch = 0
+        loss = []
+        energies = []
+
+        model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
+        #model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
+
+        if Path(self.save_dir).is_dir():
+            weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(self.save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
+            loss, energies = np.load('{}/loss.npy'.format(self.save_dir)).tolist(), np.load('{}/energies.npy'.format(self.save_dir)).tolist()
+
+        if self.realtime_plots:
+            plt.ion()
+        plots = helper.create_plots(self.n_space_dimension, self.n_eigenfuncs)
+
+        pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1))
+        for epoch in pbar:
+            batch = jax.random.uniform(rng+epoch, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
+
+            if self.sparsifying_K > 0:
+                weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
+
+            weight_dict = weight_dict.unfreeze()
+            # Run an optimization step over a training batch
+            new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta, self.system)
+            pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
+
+            loss.append(new_loss)
+            energies.append(new_energies)
+
+            if epoch % self.log_every == 0:
+                helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, *plots)
+                plt.pause(.01)    
+
     
-    # Network parameter
-    sparsifying_K = 5
-    n_dense_neurons = [64, 64, 64, 32]
-    n_eigenfuncs = 4
-
-    # Turn on/off real time plotting
-    realtime_plots = True
-    npts = 64
-    log_every = 2000
-    window = 100
-
-    # Optimizer
-    learning_rate = 1e-5
-    decay_rate = 0.9
-    moving_average_beta = 1
-
-    # Train setup
-    num_epochs = 100000
-    batch_size = 128
-    save_dir = './results/{}_{}d'.format(system, n_space_dimension)
-
-    # Create initial state
-    model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
-
-
-    sigma_t_bar = jnp.eye(n_eigenfuncs)
-    j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros_like(x), weight_dict).unfreeze()
-    start_epoch = 0
-    loss = []
-    energies = []
-
-    model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
-    #model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
-
-    if Path(save_dir).is_dir():
-        weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
-        loss, energies = np.load('{}/loss.npy'.format(save_dir)).tolist(), np.load('{}/energies.npy'.format(save_dir)).tolist()
-
-    if realtime_plots:
-        plt.ion()
-        plots = helper.create_plots(n_space_dimension, n_eigenfuncs)
-
-    pbar = tqdm(range(start_epoch+1, start_epoch+num_epochs+1))
-    for epoch in pbar:
-        batch = jax.random.uniform(rng+epoch, minval=D_min, maxval=D_max, shape=(batch_size, n_space_dimension))
-
-        if sparsifying_K > 0:
-            weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
-
-        weight_dict = weight_dict.unfreeze()
-        # Run an optimization step over a training batch
-        new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
-        pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
-
-        loss.append(new_loss)
-        energies.append(new_energies)
-
-        if epoch % log_every == 0:
-            helper.create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, charge, system, L_inv, window, *plots)
-            plt.pause(.01)
+if __name__ == "__main__":
+    trainer = ModelTrainer()
+    trainer.start_training()
 
 
 
