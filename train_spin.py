@@ -134,7 +134,7 @@ class ModelTrainer:
             self.D_min = -20
             self.D_max = 20
 
-    def start_training(self):
+    def start_training(self, show_progress = True, callback = None):
         rng = jax.random.PRNGKey(1)
         rng, init_rng = jax.random.split(rng)
         # Create initial state
@@ -158,7 +158,7 @@ class ModelTrainer:
             plt.ion()
         plots = helper.create_plots(self.n_space_dimension, self.n_eigenfuncs)
 
-        pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1))
+        pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1),disable = not show_progress)
         for epoch in pbar:
             batch = jax.random.uniform(rng+epoch, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
 
@@ -172,6 +172,11 @@ class ModelTrainer:
 
             loss.append(new_loss)
             energies.append(new_energies)
+
+            if callback is not None:
+                to_stop = callback(epoch, energies=energies)
+                if to_stop == True:
+                    return
 
             if epoch % self.log_every == 0:
                 helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, *plots)

@@ -26,7 +26,7 @@ def get_hessian_diagonals(fn, x):
 def moving_average(running_average, new_data, beta):
     return running_average - beta*(running_average - new_data)
 
-def get_exact_eigenvalues(system, n_eigenfuncs, n_space_dimension, D_min, D_max, charge):
+def get_exact_eigenvalues(system, n_eigenfuncs, n_space_dimension, D_min, D_max, charge = None):
     
     if n_space_dimension == 1:
         quantum_nos = np.arange(1, n_eigenfuncs+1)
@@ -35,6 +35,8 @@ def get_exact_eigenvalues(system, n_eigenfuncs, n_space_dimension, D_min, D_max,
             return -((quantum_nos * np.pi) / (D_max - D_min))**2
         
         if system == 'hydrogen':
+            if charge is None:
+                raise Exception("charge is not provided")
             energies = -2*charge**2 / (quantum_nos**2)
             energies /= 2 # convert back to units in the paper
             return energies
