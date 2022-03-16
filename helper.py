@@ -26,6 +26,46 @@ def get_hessian_diagonals(fn, x):
 def moving_average(running_average, new_data, beta):
     return running_average - beta*(running_average - new_data)
 
+def get_exact_eigenvalues(system, n_eigenfuncs, n_space_dimension, D_min, D_max, charge):
+    
+    if n_space_dimension == 1:
+        quantum_nos = np.arange(1, n_eigenfuncs+1)
+
+        if system == 'laplace':
+            return -((quantum_nos * np.pi) / (D_max - D_min))**2
+        
+        if system == 'hydrogen':
+            energies = -2*charge**2 / (quantum_nos**2)
+            energies /= 2 # convert back to units in the paper
+            return energies
+    
+    if n_space_dimension == 2:
+
+
+        if system == 'laplace':
+            def e(n):
+                return -((n * np.pi) / (D_max - D_min))**2
+            
+            size = 5 # will be correct for at least n_eigenfuncs=9, maybe more
+            tmp = []
+            for i in range(1, size):
+                for j in range(1, size):
+                    tmp.append(e(i) + e(j))
+            ground_truth = np.flip(np.sort(tmp))[:n_eigenfuncs]
+            return ground_truth
+
+        if system == 'hydrogen':
+            max_n = int(np.ceil(np.sqrt(n_eigenfuncs))) + 1
+            tmp = []
+            for n in range(0, max_n):
+                for _ in range(2 * n + 1):
+                    tmp.append(n)
+            quantum_nos = np.array(tmp)[:n_eigenfuncs]
+            ground_truth = -charge**2 / (2*(quantum_nos + 0.5)**2)
+            ground_truth /= 2 # convert back to units in the paper
+            return ground_truth
+
+
 
 def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100):
 
@@ -82,7 +122,7 @@ def uniform_sliding_stdev(data, window):
     rolling = np.lib.stride_tricks.as_strided(data, shape=shape, strides=strides)
     return np.std(rolling, 1)
 
-def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv, window, psi_fig, psi_ax, energies_fig, energies_ax):
+def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, charge, system, L_inv, window, psi_fig, psi_ax, energies_fig, energies_ax):
     checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir), (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
     np.save('{}/loss'.format(save_dir), loss), np.save('{}/energies'.format(save_dir), energies)
 
@@ -101,14 +141,17 @@ def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimens
     energies_array = np.array(energies)
     Path(save_dir).mkdir(parents=True, exist_ok=True)
     energies_ax.cla()
-    window = 100
+    ground_truth = get_exact_eigenvalues(system, n_eigenfuncs, n_space_dimension, D_min, D_max, charge)
     color = plt.cm.tab10(np.arange(n_eigenfuncs))
     for i, c in zip(range(n_eigenfuncs), color):
+        energies_ax.plot([0, epoch], [ground_truth[i], ground_truth[i]], '--', c=c)
         x = np.arange(window//2 - 1, len(energies_array[:, i])-(window//2))
         av = uniform_sliding_average(energies_array[:, i], window)
         stdev = uniform_sliding_stdev(energies_array[:, i], window)
         energies_ax.plot(x, av, c=c, label='Eigenvalue {}'.format(i))
         energies_ax.fill_between(x, av-stdev/2, av+stdev/2, color=c, alpha=.5)
+    if system == 'hydrogen':
+        energies_ax.set_ylim(min(ground_truth)-.1, 0)
     energies_ax.legend()
     energies_fig.savefig('{}/energies'.format(save_dir, save_dir))
 

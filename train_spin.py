@@ -104,10 +104,19 @@ if __name__ == '__main__':
 
     # Hyperparameter
     # Problem definition
-    #system = 'hydrogen'
-    system = 'laplace'
+    # system = 'laplace'
+    system = 'hydrogen'
     n_space_dimension = 2
+    charge = 1
 
+    # Simulation size
+    if system == 'laplace':
+        D_min = 0
+        D_max = np.pi
+    elif system == 'hydrogen':
+        D_min = -50
+        D_max = 50
+    
     # Network parameter
     sparsifying_K = 5
     n_dense_neurons = [64, 64, 64, 32]
@@ -117,7 +126,7 @@ if __name__ == '__main__':
     realtime_plots = True
     npts = 64
     log_every = 2000
-    window = log_every
+    window = 100
 
     # Optimizer
     learning_rate = 1e-5
@@ -128,13 +137,6 @@ if __name__ == '__main__':
     num_epochs = 100000
     batch_size = 128
     save_dir = './results/{}_{}d'.format(system, n_space_dimension)
-
-    # Simulation size
-    D_min = 0
-    D_max = np.pi
-    if (system, n_space_dimension) == ('hydrogen', 2):
-        D_min = -20
-        D_max = 20
 
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
@@ -173,7 +175,7 @@ if __name__ == '__main__':
         energies.append(new_energies)
 
         if epoch % log_every == 0:
-            helper.create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv, window, *plots)
+            helper.create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, charge, system, L_inv, window, *plots)
             plt.pause(.01)
 
 
