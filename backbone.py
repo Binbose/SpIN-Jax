@@ -34,8 +34,9 @@ class EigenNet(nn.Module):
             L_inv = None
         x = x_in
         #x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
-        activation = jax.nn.sigmoid
+
         '''
+        activation = jax.nn.sigmoid
         initilization = initializers.variance_scaling
         x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization(self.features[0], 'fan_out', 'normal'))(x)
         x = activation(x)
@@ -44,8 +45,8 @@ class EigenNet(nn.Module):
             x = nn.Dense(feat, use_bias=False, kernel_init=initilization(feat, 'fan_out', 'normal'))(x)
             x = activation(x)
         x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization(self.features[-1], 'fan_out', 'normal'))(x)
-
         '''
+
         activation = jax.nn.sigmoid
         initilization = initializers.lecun_normal
         x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization())(x)
