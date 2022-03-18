@@ -21,9 +21,9 @@ def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()
     elif system == 'laplace':
-        v_fn = lambda x: 0*x
+        v_fn = lambda x: 0*x.sum(-1)
     else:
-        v_fn = lambda x: 0*x
+        v_fn = lambda x: 0*x.sum(-1)
 
 
     if fn_x is None:

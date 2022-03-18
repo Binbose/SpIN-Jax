@@ -101,13 +101,13 @@ if __name__ == '__main__':
 
     # Hyperparameter
     # Problem definition
-    #system = 'hydrogen'
-    system = 'laplace'
-    n_space_dimension = 1
+    system = 'hydrogen'
+    #system = 'laplace'
+    n_space_dimension = 2
 
     # Network parameter
     sparsifying_K = 5
-    n_dense_neurons = [64, 64, 64, 32]
+    n_dense_neurons = [64, 64, 64]
     n_eigenfuncs = 4
 
     # Optimizer
@@ -117,12 +117,12 @@ if __name__ == '__main__':
 
     # Train setup
     num_epochs = 100000
-    batch_size = 128
+    batch_size = 512
     save_dir = './results/{}_{}d'.format(system, n_space_dimension)
 
     # Simulation size
-    D_min = 0
-    D_max = np.pi
+    D_min = -50
+    D_max = 50
 
     # Create initial state
     model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=n_space_dimension, init_rng=init_rng)
@@ -151,14 +151,14 @@ if __name__ == '__main__':
         weight_dict = weight_dict.unfreeze()
         # Run an optimization step over a training batch
         new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, weight_dict, opt, opt_state, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta)
-        pbar.set_description('Loss {:.2f}'.format(np.around(np.asarray(new_loss), 3).item()))
+        pbar.set_description('Loss {:.3f}'.format(np.around(np.asarray(new_loss), 3).item()))
 
 
         loss.append(new_loss)
         energies.append(new_energies)
 
 
-        if epoch % 1000 == 0:
+        if epoch % 10000 == 0 or epoch == 1:
             helper.create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, L_inv)
 
 
