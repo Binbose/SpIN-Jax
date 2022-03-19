@@ -7,7 +7,7 @@ import optax                           # Optimizers
 
 import helper
 from backbone import EigenNet
-from physics import hamiltonian_operator
+from physics import hamiltonian_operator, construct_hamiltonian_function
 from helper import moving_average
 from flax.core import FrozenDict
 import time
@@ -99,10 +99,9 @@ def train_step(model_apply_jitted, h_fn, weight_dict, opt_update, opt_state, opt
     print('TIME del ', time.time() - t1)
 
     t1 = time.time()
-    h_u = hamiltonian_operator(u_of_x, batch, fn_x=pred, system=system, nummerical_diff=False, eps=0.1)
-    #h_fn = jit(hamiltonian_operator,static_argnums=(0,3,4,5))
-    #h_u = h_fn(u_of_x, batch, fn_x=pred, system=system, nummerical_diff=False, eps=0.1)
+    h_u = h_fn(weight_dict, batch)
     print('TIME hamilton ', time.time() - t1)
+
 
 
     t1 = time.time()
@@ -149,7 +148,7 @@ class ModelTrainer:
 
         # Train setup
         self.num_epochs = 100000
-        self.batch_size = 512
+        self.batch_size = 16
         self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
 
         # Simulation size
@@ -173,8 +172,7 @@ class ModelTrainer:
         energies = []
 
         model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
-        vectorized_model_laplace_jitted = vmap(jax.jit(model_apply_jitted), in_axes=(None,0))
-
+        h_fn = jit(construct_hamiltonian_function(model_apply_jitted, system=self.system, eps=0.0))
 
         #model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
         opt_update_jitted = jit(lambda masked_gradient, opt_state: opt.update(masked_gradient, opt_state))

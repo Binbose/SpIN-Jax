@@ -15,18 +15,20 @@ from functools import partial
 def vectorized_diagonal(m):
     return vmap(jnp.diag)(m)
 
+def vectorized_trace(m):
+    return vmap(jnp.trace)(m)
+
 def vectorized_hessian(fn):
     return vmap(jax.hessian(fn))
 
-'''
 def get_hessian_diagonals(fn, x):
     vectorized_hessian_result = vectorized_hessian(fn)(x)
     batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], vectorized_hessian_result.shape[2], vectorized_hessian_result.shape[3]
     vectorized_hessian_result = vectorized_hessian_result.reshape(batch*n_eigenfunc, c1, c2)
     return vectorized_diagonal(vectorized_hessian_result).reshape(batch, n_eigenfunc, -1)
-'''
 
-def get_hessian_diagonals(vectorized_hessian, x):
+
+def compute_hessian_diagonals(vectorized_hessian, x):
     vectorized_hessian_result = vectorized_hessian(x)
     batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], vectorized_hessian_result.shape[2], vectorized_hessian_result.shape[3]
     vectorized_hessian_result = vectorized_hessian_result.reshape(batch*n_eigenfunc, c1, c2)
