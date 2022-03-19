@@ -19,7 +19,6 @@ def second_difference_along_coordinate(fn, fn_x, x , i, eps):
     coordinate[:,i] = 1
     return fn(x + coordinate * eps) + fn(x - coordinate * eps) - 2 * fn_x
 
-#@partial(jit, static_argnums=(0,), static_argnames=('nummerical_diff', 'eps', 'system'))
 def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system='hydrogen'):
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()
@@ -61,16 +60,14 @@ def laplace_numerical(fn, eps=0.1):
     return _laplace_numerical
 
 def construct_hamiltonian_function(fn, system='hydrogen', eps=0.0):
-    def _construct(weight_dict, x):
+    def _construct(weight_dict, x, fn_x):
         vectorized_hessian_result = vectorized_hessian(weight_dict, x)
         batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], \
                                      vectorized_hessian_result.shape[2], vectorized_hessian_result.shape[3]
         vectorized_hessian_result = vectorized_hessian_result.reshape(batch * n_eigenfunc, c1, c2)
         laplace = vectorized_trace(vectorized_hessian_result).reshape(batch, n_eigenfunc, -1)[:,:,0]
 
-
-
-        return laplace + v_fn(x)[:,None] * fn(weight_dict, x)
+        return laplace + v_fn(x)[:,None] * fn_x
 
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()
@@ -87,5 +84,4 @@ def construct_hamiltonian_function(fn, system='hydrogen', eps=0.0):
         vectorized_hessian = vmap(hessian, in_axes=[None, 0])
 
     return _construct
-    #return lambda weight_dict, x: laplace_fn(weight_dict, x) + v_fn(x)[:,None] * fn(weight_dict, x)
 

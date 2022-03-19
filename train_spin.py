@@ -61,63 +61,45 @@ def get_masked_gradient_function(A_1, A_2, moving_average_beta):
     return lambda del_u_del_weights, j_sigma_t_bar: _calculate_masked_gradient(del_u_del_weights, j_sigma_t_bar, A_1, A_2)
 
 # This jit seems not making any difference
+@jit
 def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar):
     sigma_t_hat = np.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
     pi_t_hat = np.mean(h_u[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
 
     sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=moving_average_beta)
 
-    L = np.linalg.cholesky(sigma_t_bar)
-    L_inv = np.linalg.inv(L)
+    L = jnp.linalg.cholesky(sigma_t_bar)
+    L_inv = jnp.linalg.inv(L)
     L_inv_T = L_inv.T
-    L_diag_inv = np.eye(L.shape[0]) * (1/jnp.diag(L))
-
+    L_diag_inv = jnp.eye(L.shape[0]) * (1/jnp.diag(L))
+    
     A_1 = L_inv_T @ L_diag_inv
     A_1 = h_u @ A_1
-
+    
     Lambda = L_inv @ pi_t_hat @ L_inv_T
-    A_2 = L_inv_T @ np.triu(Lambda @ L_diag_inv)
+    A_2 = L_inv_T @ jnp.triu(Lambda @ L_diag_inv)
     A_2 = pred @ A_2
-
+    
     masked_gradient_function = get_masked_gradient_function(A_1, A_2, moving_average_beta)
-    del_u_del_weights = jax.tree_multimap(masked_gradient_function, del_u_del_weights, j_sigma_t_bar)
 
+    del_u_del_weights = jax.tree_multimap(masked_gradient_function, del_u_del_weights, j_sigma_t_bar)
+    
     return FrozenDict(del_u_del_weights), Lambda, L_inv
 
+def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_update, opt_state, optax_apply_updates, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
+    pred = model_apply_jitted(weight_dict, batch)
 
-def train_step(model_apply_jitted, h_fn, weight_dict, opt_update, opt_state, optax_apply_updates, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta, system):
-    t1 = time.time()
-    u_of_x = get_network_as_function_of_input(model_apply_jitted, weight_dict)
-    u_of_w = get_network_as_function_of_weights(model_apply_jitted, batch)
-    print('TIME get u ', time.time() - t1)
+    del_u_del_weights = del_u_del_weights_fn(weight_dict, batch)
 
-    t1 = time.time()
-    pred = u_of_x(batch)
-    print('TIME pred ', time.time() - t1)
-    t1 = time.time()
-    del_u_del_weights = jacrev(u_of_w,)(weight_dict)
-    print('TIME del ', time.time() - t1)
-
-    t1 = time.time()
-    h_u = h_fn(weight_dict, batch)
-    print('TIME hamilton ', time.time() - t1)
-
-
-
-    t1 = time.time()
+    h_u = h_fn(weight_dict, batch, pred)
     masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar)
-    print('TIME masked del ', time.time() - t1)
 
-    t1 = time.time()
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt_update(masked_gradient, opt_state)
     weight_dict = optax_apply_updates(weight_dict, updates)
-    print('TIME update ', time.time() - t1)
 
-    t1 = time.time()
     loss = jnp.trace(Lambda)
     energies = jnp.diag(Lambda)
-    print('TIME extract ', time.time() - t1)
 
     return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state
 
@@ -173,8 +155,7 @@ class ModelTrainer:
 
         model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
         h_fn = jit(construct_hamiltonian_function(model_apply_jitted, system=self.system, eps=0.0))
-
-        #model_apply_jitted = lambda params, inputs: model.apply(params, inputs)
+        del_u_del_weights_fn = jit(jacrev(model_apply_jitted, argnums=0))
         opt_update_jitted = jit(lambda masked_gradient, opt_state: opt.update(masked_gradient, opt_state))
         optax_apply_updates_jitted = jit(lambda weight_dict, updates: optax.apply_updates(weight_dict, updates))
 
@@ -197,7 +178,7 @@ class ModelTrainer:
 
             weight_dict = weight_dict.unfreeze()
             # Run an optimization step over a training batch
-            new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, h_fn, weight_dict, opt_update_jitted, opt_state, optax_apply_updates_jitted, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta, self.system)
+            new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_update_jitted, opt_state, optax_apply_updates_jitted, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta)
             pbar.set_description('Loss {:.3f}'.format(np.around(np.asarray(new_loss), 3).item()))
 
             loss.append(new_loss)
