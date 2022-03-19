@@ -9,6 +9,8 @@ from pathlib import Path
 from flax.training import checkpoints
 from jax import vmap
 from jax import jacfwd
+from jax import jit
+from functools import partial
 
 def vectorized_diagonal(m):
     return vmap(jnp.diag)(m)
@@ -16,12 +18,19 @@ def vectorized_diagonal(m):
 def vectorized_hessian(fn):
     return vmap(jax.hessian(fn))
 
+'''
 def get_hessian_diagonals(fn, x):
     vectorized_hessian_result = vectorized_hessian(fn)(x)
     batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], vectorized_hessian_result.shape[2], vectorized_hessian_result.shape[3]
     vectorized_hessian_result = vectorized_hessian_result.reshape(batch*n_eigenfunc, c1, c2)
     return vectorized_diagonal(vectorized_hessian_result).reshape(batch, n_eigenfunc, -1)
+'''
 
+def get_hessian_diagonals(vectorized_hessian, x):
+    vectorized_hessian_result = vectorized_hessian(x)
+    batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], vectorized_hessian_result.shape[2], vectorized_hessian_result.shape[3]
+    vectorized_hessian_result = vectorized_hessian_result.reshape(batch*n_eigenfunc, c1, c2)
+    return vectorized_diagonal(vectorized_hessian_result).reshape(batch, n_eigenfunc, -1)
 
 def moving_average(running_average, new_data, beta):
     return running_average - beta*(running_average - new_data)
@@ -140,42 +149,43 @@ def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimens
     Path(eigenfunc_dir).mkdir(parents=True, exist_ok=True)
     psi_fig.savefig(f'{eigenfunc_dir}/epoch_{epoch}.png')
 
-    energies_array = np.array(energies)
-    Path(save_dir).mkdir(parents=True, exist_ok=True)
-    energies_ax.cla()
-    ground_truth = get_exact_eigenvalues(system, n_eigenfuncs, n_space_dimension, D_min, D_max, charge)
-    color = plt.cm.tab10(np.arange(n_eigenfuncs))
-    for i, c in zip(range(n_eigenfuncs), color):
-        energies_ax.plot([0, epoch], [ground_truth[i], ground_truth[i]], '--', c=c)
-        x = np.arange(window//2 - 1, len(energies_array[:, i])-(window//2))
-        av = uniform_sliding_average(energies_array[:, i], window)
-        stdev = uniform_sliding_stdev(energies_array[:, i], window)
-        energies_ax.plot(x, av, c=c, label='Eigenvalue {}'.format(i))
-        energies_ax.fill_between(x, av-stdev/2, av+stdev/2, color=c, alpha=.5)
-    if system == 'hydrogen':
-        energies_ax.set_ylim(min(ground_truth)-.1, 0)
-    energies_ax.legend()
-    energies_fig.savefig('{}/energies'.format(save_dir, save_dir))
+    if epoch > 1:
+        energies_array = np.array(energies)
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+        energies_ax.cla()
+        ground_truth = get_exact_eigenvalues(system, n_eigenfuncs, n_space_dimension, D_min, D_max, charge)
+        color = plt.cm.tab10(np.arange(n_eigenfuncs))
+        for i, c in zip(range(n_eigenfuncs), color):
+            energies_ax.plot([0, epoch], [ground_truth[i], ground_truth[i]], '--', c=c)
+            x = np.arange(window//2 - 1, len(energies_array[:, i])-(window//2))
+            av = uniform_sliding_average(energies_array[:, i], window)
+            stdev = uniform_sliding_stdev(energies_array[:, i], window)
+            energies_ax.plot(x, av, c=c, label='Eigenvalue {}'.format(i))
+            energies_ax.fill_between(x, av-stdev/2, av+stdev/2, color=c, alpha=.5)
+        if system == 'hydrogen':
+            energies_ax.set_ylim(min(ground_truth)-.1, 0)
+        energies_ax.legend()
+        energies_fig.savefig('{}/energies'.format(save_dir, save_dir))
 
-    fig, ax = plt.subplots()
-    for i in range(n_eigenfuncs):
-        ax.plot(energies_array[-500:, i], label='Eigenvalue {}'.format(i))
-    ax.legend()
-    fig.savefig('{}/energies_newest'.format(save_dir, save_dir))
-    plt.close(fig)
+        fig, ax = plt.subplots()
+        for i in range(n_eigenfuncs):
+            ax.plot(energies_array[-500:, i], label='Eigenvalue {}'.format(i))
+        ax.legend()
+        fig.savefig('{}/energies_newest'.format(save_dir, save_dir))
+        plt.close(fig)
 
-    fig, ax = plt.subplots()
-    ax.plot(loss)
-    fig.savefig('{}/loss'.format(save_dir))
-    plt.close(fig)
+        fig, ax = plt.subplots()
+        ax.plot(loss)
+        fig.savefig('{}/loss'.format(save_dir))
+        plt.close(fig)
 
-    fig, ax = plt.subplots()
-    ax.plot(loss[-500:])
-    fig.savefig('{}/loss_newest'.format(save_dir))
-    plt.close(fig)
+        fig, ax = plt.subplots()
+        ax.plot(loss[-500:])
+        fig.savefig('{}/loss_newest'.format(save_dir))
+        plt.close(fig)
 
-    np.save('{}/loss'.format(save_dir), loss)
-    np.save('{}/energies'.format(save_dir), energies)
+        np.save('{}/loss'.format(save_dir), loss)
+        np.save('{}/energies'.format(save_dir), energies)
 
 
 if __name__ == '__main__':

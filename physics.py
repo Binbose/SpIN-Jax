@@ -3,6 +3,8 @@ import numpy as np
 from helper import get_hessian_diagonals
 import time
 import jax
+from functools import partial
+from jax import jit
 
 def get_hydrogen_potential():
 
@@ -16,7 +18,7 @@ def second_difference_along_coordinate(fn, fn_x, x , i, eps):
     coordinate[:,i] = 1
     return fn(x + coordinate * eps) + fn(x - coordinate * eps) - 2 * fn_x
 
-
+#@partial(jit, static_argnums=(0,), static_argnames=('nummerical_diff', 'eps', 'system'))
 def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system='hydrogen'):
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()

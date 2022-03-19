@@ -47,7 +47,7 @@ class EigenNet(nn.Module):
         x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization(self.features[-1], 'fan_out', 'normal'))(x)
         '''
 
-        activation = jax.nn.sigmoid
+        activation = jax.nn.softplus
         initilization = initializers.lecun_normal
         x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization())(x)
         x = activation(x)
