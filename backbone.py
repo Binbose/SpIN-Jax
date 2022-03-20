@@ -47,15 +47,16 @@ class EigenNet(nn.Module):
         x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization(self.features[-1], 'fan_out', 'normal'))(x)
         '''
 
+        use_bias=True
         activation = jax.nn.softplus
         initilization = initializers.lecun_normal
-        x = nn.Dense(self.features[0], use_bias=False, kernel_init=initilization())(x)
+        x = nn.Dense(self.features[0], use_bias=use_bias, kernel_init=initilization())(x)
         x = activation(x)
 
         for i, feat in enumerate(self.features[1:-1]):
-            x = nn.Dense(feat, use_bias=False, kernel_init=initilization())(x)
+            x = nn.Dense(feat, use_bias=use_bias, kernel_init=initilization())(x)
             x = activation(x)
-        x = nn.Dense(self.features[-1], use_bias=False, kernel_init=initilization())(x)
+        x = nn.Dense(self.features[-1], use_bias=use_bias, kernel_init=initilization())(x)
 
 
         if self.mask_type == 'quadratic':

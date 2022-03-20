@@ -47,18 +47,22 @@ def get_network_as_function_of_weights(model_apply, batch):
     return lambda weights: model_apply(weights, batch)
 
 def get_masked_gradient_function(A_1, A_2, moving_average_beta):
-    def _calculate_masked_gradient(del_u_del_weights, j_sigma_t_bar, A_1, A_2):
-        j_pi_t_hat = jnp.einsum('bj, bjcw -> bcw', A_1, del_u_del_weights)
-        j_pi_t_hat = jnp.mean(j_pi_t_hat, axis=0)
+    def _calculate_j_pi_t_hat(del_u_del_weights):
+        j_pi_t_hat = jnp.tensordot(A_1, del_u_del_weights, [[0, 1], [0, 1]])
 
-        j_sigma_t_hat = jnp.einsum('bj, bjcw -> bcw', A_2, del_u_del_weights)
-        j_sigma_t_hat = jnp.mean(j_sigma_t_hat, axis=0)
+        return j_pi_t_hat
+
+    def _calculate_j_sigma_t_bar(del_u_del_weights, j_sigma_t_bar):
+        j_sigma_t_hat = jnp.tensordot(A_2, del_u_del_weights, [[0, 1], [0, 1]])
         j_sigma_t_bar = moving_average(j_sigma_t_bar, j_sigma_t_hat, moving_average_beta)
 
+        return j_sigma_t_bar
+
+    def _calculate_masked_gradient(j_pi_t_hat, j_sigma_t_bar):
         masked_grad = -(j_pi_t_hat - j_sigma_t_bar)
         return masked_grad
 
-    return lambda del_u_del_weights, j_sigma_t_bar: _calculate_masked_gradient(del_u_del_weights, j_sigma_t_bar, A_1, A_2)
+    return _calculate_j_pi_t_hat, _calculate_j_sigma_t_bar, _calculate_masked_gradient
 
 # This jit seems not making any difference
 @jit
@@ -80,11 +84,13 @@ def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_
     A_2 = L_inv_T @ jnp.triu(Lambda @ L_diag_inv)
     A_2 = pred @ A_2
     
-    masked_gradient_function = get_masked_gradient_function(A_1, A_2, moving_average_beta)
+    _calculate_j_pi_t_hat, _calculate_j_sigma_t_bar, _calculate_masked_gradient = get_masked_gradient_function(A_1, A_2, moving_average_beta)
+    j_pi_t_hat = jax.tree_multimap(_calculate_j_pi_t_hat, del_u_del_weights)
+    j_sigma_t_bar = jax.tree_multimap(_calculate_j_sigma_t_bar, del_u_del_weights, j_sigma_t_bar)
 
-    del_u_del_weights = jax.tree_multimap(masked_gradient_function, del_u_del_weights, j_sigma_t_bar)
-    
-    return FrozenDict(del_u_del_weights), Lambda, L_inv
+    del_u_del_weights = jax.tree_multimap(_calculate_masked_gradient, j_pi_t_hat, j_sigma_t_bar)
+
+    return FrozenDict(del_u_del_weights), Lambda, L_inv, j_sigma_t_bar
 
 def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_update, opt_state, optax_apply_updates, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
     pred = model_apply_jitted(weight_dict, batch)
@@ -92,7 +98,7 @@ def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_
     del_u_del_weights = del_u_del_weights_fn(weight_dict, batch)
 
     h_u = h_fn(weight_dict, batch, pred)
-    masked_gradient, Lambda, L_inv = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar)
+    masked_gradient, Lambda, L_inv, j_sigma_t_bar = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar)
 
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt_update(masked_gradient, opt_state)
@@ -120,7 +126,7 @@ class ModelTrainer:
         # Turn on/off real time plotting
         self.realtime_plots = True
         self.npts = 64
-        self.log_every = 1000
+        self.log_every = 10000
         self.window = 100
 
         # Optimizer
@@ -130,7 +136,7 @@ class ModelTrainer:
 
         # Train setup
         self.num_epochs = 100000
-        self.batch_size = 16
+        self.batch_size = 128
         self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
 
         # Simulation size
