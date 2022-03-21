@@ -58,11 +58,12 @@ class EigenNet(nn.Module):
             x = activation(x)
         x = nn.Dense(self.features[-1], use_bias=use_bias, kernel_init=initilization())(x)
 
-
         if self.mask_type == 'quadratic':
             # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition \psi(D_max) = 0 and \psi(D_min) = 0
             # See page 16th for more information
-            d = jnp.sqrt(2 * (self.D_max - (self.D_max + self.D_min) / 2) ** 2 - (x_in - (self.D_max + self.D_min) / 2) ** 2) - (self.D_max - (self.D_max + self.D_min) / 2)
+            D_avg = (self.D_max + self.D_min) / 2
+            lim = self.D_max - D_avg
+            d = (jnp.sqrt(2 * lim ** 2 - (x_in - D_avg) ** 2) - lim) / lim
             d = jnp.prod(d, axis=-1, keepdims=True)
             x = x * d
         elif self.mask_type == 'exp':
@@ -70,18 +71,15 @@ class EigenNet(nn.Module):
             # Standard deviation of gaussian is learnable
             mean = (self.D_max + self.D_min) / 2
             sigma = jnp.max(jnp.array([self.D_max, self.D_min])) / 4
-
-            #embedding = jnp.abs(nn.Embed(1, self.features[-1], embedding_init=constant(sigma))(jnp.eye(1, dtype='int32')))
-            #sigma = (embedding * jnp.eye(k))[0]
-            #print(embedding)
-
-            normalization = 1 / (jnp.sqrt(2*jnp.pi) * sigma)
-            d = normalization * jnp.exp(-0.5 * jnp.linalg.norm(x_in-mean, axis=-1, keepdims=True)**2 / sigma**2)
+            # embedding = jnp.abs(nn.Embed(1, self.features[-1], embedding_init=constant(sigma))(jnp.eye(1, dtype=‘int32’)))
+            # sigma = (embedding * jnp.eye(k))[0]
+            # print(embedding)
+            normalization = 1 / (jnp.sqrt(2 * jnp.pi) * sigma)
+            d = normalization * jnp.exp(-0.5 * jnp.linalg.norm(x_in - mean, axis=-1, keepdims=True) ** 2 / sigma ** 2)
             x = x * d
 
         if L_inv is not None:
             x = jnp.einsum('ij, bj -> bi', L_inv, x)
-
         return x
 
     @staticmethod

@@ -60,6 +60,7 @@ def get_masked_gradient_function(A_1, A_2, moving_average_beta):
 
     def _calculate_masked_gradient(j_pi_t_hat, j_sigma_t_bar):
         masked_grad = -(j_pi_t_hat - j_sigma_t_bar)
+
         return masked_grad
 
     return _calculate_j_pi_t_hat, _calculate_j_sigma_t_bar, _calculate_masked_gradient
@@ -98,6 +99,7 @@ def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_
     del_u_del_weights = del_u_del_weights_fn(weight_dict, batch)
 
     h_u = h_fn(weight_dict, batch, pred)
+
     masked_gradient, Lambda, L_inv, j_sigma_t_bar = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar)
 
     weight_dict = FrozenDict(weight_dict)
@@ -125,7 +127,7 @@ class ModelTrainer:
 
         # Turn on/off real time plotting
         self.realtime_plots = True
-        self.npts = 64
+        self.npts = 256
         self.log_every = 10000
         self.window = 100
 
@@ -136,7 +138,7 @@ class ModelTrainer:
 
         # Train setup
         self.num_epochs = 100000
-        self.batch_size = 128
+        self.batch_size = 256
         self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
 
         # Simulation size
@@ -146,8 +148,8 @@ class ModelTrainer:
             self.D_min = -50
             self.D_max = 50
 
-    def start_training(self, show_progress = True, callback = None):
-        rng = jax.random.PRNGKey(1)
+    def start_training(self, show_progress=True, callback=None):
+        rng = jax.random.PRNGKey(2)
         rng, init_rng = jax.random.split(rng)
         # Create initial state
         model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(self.n_dense_neurons, self.n_eigenfuncs, self.batch_size, self.D_min, self.D_max, self.learning_rate, self.decay_rate, self.sparsifying_K, n_space_dimension=self.n_space_dimension, init_rng=init_rng)
@@ -177,7 +179,8 @@ class ModelTrainer:
 
         pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1),disable = not show_progress)
         for epoch in pbar:
-            batch = jax.random.uniform(rng+epoch, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
+            rng, sub_key = jax.random.split(rng)
+            batch = jax.random.uniform(sub_key, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
 
             if self.sparsifying_K > 0:
                 weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
@@ -196,7 +199,7 @@ class ModelTrainer:
                     return
 
             if epoch % self.log_every == 0 or epoch == 1:
-                helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, *plots)
+                helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, self.npts, *plots)
                 plt.pause(.01)
 
 
