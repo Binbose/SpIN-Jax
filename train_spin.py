@@ -26,19 +26,6 @@ import matplotlib.pyplot as plt
 #config.update("jax_enable_x64", True)
 #config.update("jax_debug_nans", True)
 
-def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
-    model = EigenNet(features=n_dense_neurons + [n_eigenfuncs], D_min=D_min, D_max=D_max)
-    batch = jnp.ones((batch_size, n_space_dimension))
-    weight_dict = model.init(init_rng, batch)
-    layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
-
-    #opt = optax.rmsprop(learning_rate, decay_rate)
-    opt = optax.adam(learning_rate, decay_rate)
-    opt_state = opt.init(weight_dict)
-
-    #opt_init, opt_update, get_params = optimizers.adam(learning_rate)
-    #opt_state = opt_init(weight_dict)
-    return model, weight_dict, opt, opt_state, layer_sparsifying_masks
 
 def get_network_as_function_of_input(model_apply, params):
     return lambda batch: model_apply(params, batch)
@@ -148,12 +135,26 @@ class ModelTrainer:
             self.D_min = -50
             self.D_max = 50
 
+    def create_train_state(self, init_rng):
+        model = EigenNet(features=self.n_dense_neurons + [self.n_eigenfuncs], D_min=self.D_min, D_max=self.D_max)
+        batch = jnp.ones((self.batch_size, self.n_space_dimension))
+        weight_dict = model.init(init_rng, batch)
+        layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, self.sparsifying_K)
+
+        #opt = optax.rmsprop(learning_rate, decay_rate)
+        opt = optax.adam(self.learning_rate, self.decay_rate)
+        opt_state = opt.init(weight_dict)
+
+        #opt_init, opt_update, get_params = optimizers.adam(learning_rate)
+        #opt_state = opt_init(weight_dict)
+        return model, weight_dict, opt, opt_state, layer_sparsifying_masks
+        
+
     def start_training(self, show_progress=True, callback=None):
         rng = jax.random.PRNGKey(2)
         rng, init_rng = jax.random.split(rng)
         # Create initial state
-        model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(self.n_dense_neurons, self.n_eigenfuncs, self.batch_size, self.D_min, self.D_max, self.learning_rate, self.decay_rate, self.sparsifying_K, n_space_dimension=self.n_space_dimension, init_rng=init_rng)
-
+        model, weight_dict, opt, opt_state, layer_sparsifying_masks = self.create_train_state(init_rng)
 
         sigma_t_bar = jnp.eye(self.n_eigenfuncs)
         j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros_like(x), weight_dict).unfreeze()
