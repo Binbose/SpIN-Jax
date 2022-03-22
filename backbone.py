@@ -57,13 +57,15 @@ class EigenNet(nn.Module):
             x = nn.Dense(feat, use_bias=use_bias, kernel_init=initilization())(x)
             x = activation(x)
         x = nn.Dense(self.features[-1], use_bias=use_bias, kernel_init=initilization())(x)
-
+        
 
         if self.mask_type == 'quadratic':
             # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition \psi(D_max) = 0 and \psi(D_min) = 0
             # See page 16th for more information
-            d = jnp.sqrt(2 * (self.D_max - (self.D_max + self.D_min) / 2) ** 2 - (x_in - (self.D_max + self.D_min) / 2) ** 2) - (self.D_max - (self.D_max + self.D_min) / 2)
-            d = jnp.prod(d, axis=-1, keepdims=True)
+            D_avg = (self.D_max + self.D_min) / 2
+            lim = self.D_max - D_avg
+            d = (jnp.sqrt(2 * lim ** 2 - (x_in - D_avg) ** 2) - lim) / lim
+            d = jnp.prod(d, axis=-1, keepdims=True) 
             x = x * d
         elif self.mask_type == 'exp':
             # Mask with gaussian instead to satisfy boundary condition \psi(x) -> 0 for x -> \infty

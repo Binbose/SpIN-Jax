@@ -14,10 +14,10 @@ def get_hydrogen_potential():
 
     return hygrogen_potential
 
-def second_difference_along_coordinate(fn, fn_x, x , i, eps):
+def second_difference_along_coordinate(weight_dict, fn, x , i, eps):
     coordinate = np.zeros_like(x)
     coordinate[:,i] = 1
-    return fn(x + coordinate * eps) + fn(x - coordinate * eps) - 2 * fn_x
+    return fn(weight_dict, x + coordinate * eps) + fn(weight_dict, x - coordinate * eps) - 2 * fn(weight_dict, x)
 
 def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system='hydrogen'):
     if system == 'hydrogen':
@@ -49,10 +49,11 @@ def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system
 
 
 def laplace_numerical(fn, eps=0.1):
-    def _laplace_numerical(x, fn_x):
+    def _laplace_numerical(weight_dict, x):
         differences = 0
-        for i in range(x.shape[1]):
-            differences += second_difference_along_coordinate(fn, fn_x, x, i, eps)
+        #for i in range(x.shape[1]):
+        for i in range(2):
+            differences += second_difference_along_coordinate(weight_dict, fn, x, i, eps)
         laplacian = differences / eps ** 2
 
         return laplacian
@@ -61,13 +62,17 @@ def laplace_numerical(fn, eps=0.1):
 
 def construct_hamiltonian_function(fn, system='hydrogen', eps=0.0):
     def _construct(weight_dict, x, fn_x):
-        vectorized_hessian_result = vectorized_hessian(weight_dict, x)
-        batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], \
-                                     vectorized_hessian_result.shape[2], vectorized_hessian_result.shape[3]
-        vectorized_hessian_result = vectorized_hessian_result.reshape(batch * n_eigenfunc, c1, c2)
-        laplace = vectorized_trace(vectorized_hessian_result).reshape(batch, n_eigenfunc, -1)[:,:,0]
+        if eps==0.0:
+            vectorized_hessian_result = vectorized_hessian(weight_dict, x)
+            batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], \
+                                         vectorized_hessian_result.shape[2], vectorized_hessian_result.shape[3]
+            vectorized_hessian_result = vectorized_hessian_result.reshape(batch * n_eigenfunc, c1, c2)
+            laplace = vectorized_trace(vectorized_hessian_result).reshape(batch, n_eigenfunc, -1)[:,:,0]
+        else:
+            laplace = vectorized_hessian(weight_dict, x)
 
-        return laplace + v_fn(x)[:,None] * fn_x
+        return -laplace + v_fn(x)[:,None] * fn_x
+        # return v_fn(x)[:,None] * fn_x
 
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()
@@ -78,7 +83,7 @@ def construct_hamiltonian_function(fn, system='hydrogen', eps=0.0):
         exit()
 
     if eps > 0.0:
-        laplace_fn = jit(laplace_numerical(fn, eps=eps))
+        vectorized_hessian = laplace_numerical(fn, eps=eps)
     else:
         hessian = jax.hessian(fn, argnums=1)
         vectorized_hessian = vmap(hessian, in_axes=[None, 0])
