@@ -65,11 +65,13 @@ def get_masked_gradient_function(A_1, A_2, moving_average_beta):
 
     return _calculate_j_pi_t_hat, _calculate_j_sigma_t_bar, _calculate_masked_gradient
 
-# This jit seems not making any difference
-@jit
+
+
+
+#@jit
 def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar):
     sigma_t_hat = np.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
-    pi_t_hat = np.mean(h_u[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
+    pi_t_hat = np.mean(pred[:, :, None]@h_u[:, :, None].swapaxes(2, 1), axis=0)
 
     sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=moving_average_beta)
 
@@ -97,6 +99,8 @@ def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_
     pred = model_apply_jitted(weight_dict, batch)
 
     del_u_del_weights = del_u_del_weights_fn(weight_dict, batch)
+    print(jax.tree_multimap(lambda x: x.shape, del_u_del_weights))
+    exit()
 
     h_u = h_fn(weight_dict, batch, pred)
 

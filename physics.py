@@ -71,7 +71,7 @@ def construct_hamiltonian_function(fn, system='hydrogen', eps=0.0):
         else:
             laplace = vectorized_hessian(weight_dict, x)
 
-        return laplace + v_fn(x)[:,None] * fn_x
+        return -laplace + v_fn(x)[:,None] * fn_x
 
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()
