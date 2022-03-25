@@ -82,6 +82,14 @@ class EigenNet(nn.Module):
             x = jnp.einsum('ij, bj -> bi', L_inv, x)
         return x
 
+
+    """
+    Weight sparsifying:
+    In order to separete different eigenfunctions, we modify the network by mask some weights in each layer.
+    The mask will make the layers of network more and more "block-sparse" as the network gets deeper.
+    Finally, the lower layers of the network will represents the feature that shared by all the eigenfunctions.
+    The higher layers of the network will be responsible for the distincted features for each eigenfunction.
+    """
     @staticmethod
     def get_layer_sparsifying_mask(W, sparsifing_K, l, L):
         l += 1

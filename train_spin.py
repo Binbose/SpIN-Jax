@@ -87,6 +87,7 @@ def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_
 
     h_u = h_fn(weight_dict, batch, pred)
 
+    # Calculate the masked gradient for the optimizer
     masked_gradient, Lambda, L_inv, j_sigma_t_bar = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar)
 
     weight_dict = FrozenDict(weight_dict)
@@ -136,6 +137,9 @@ class ModelTrainer:
             self.D_max = 50
 
     def create_train_state(self, init_rng):
+        """
+        Initialize the train state randomly by init_rng 
+        """
         model = EigenNet(features=self.n_dense_neurons + [self.n_eigenfuncs], D_min=self.D_min, D_max=self.D_max)
         batch = jnp.ones((self.batch_size, self.n_space_dimension))
         weight_dict = model.init(init_rng, batch)
@@ -151,23 +155,37 @@ class ModelTrainer:
         
 
     def start_training(self, show_progress=True, callback=None):
+        """
+        Function for training the model
+        """
         rng = jax.random.PRNGKey(2)
         rng, init_rng = jax.random.split(rng)
         # Create initial state
         model, weight_dict, opt, opt_state, layer_sparsifying_masks = self.create_train_state(init_rng)
 
+        # Initialize sigma_t_bar as an identity matrix
         sigma_t_bar = jnp.eye(self.n_eigenfuncs)
+        # 
         j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros_like(x), weight_dict).unfreeze()
+
         start_epoch = 0
         loss = []
         energies = []
 
+        """
+        JIT every computational heavy functions for acceleration
+        """
+ 
+        # Function for the model, which inputs params (weights) and inputs (coordinates), outputs eigenfunctions at that coordinates. 
         model_apply_jitted = jax.jit(lambda params, inputs: model.apply(params, inputs))
+        # Function for the Hamiltonian kernel
         h_fn = jit(construct_hamiltonian_function(model_apply_jitted, system=self.system, eps=0.0))
+        # Function for evaluating the gradient of the model output w.r.t. the weights
         del_u_del_weights_fn = jit(jacrev(model_apply_jitted, argnums=0))
+        # Function for updating the optmization state
         opt_update_jitted = jit(lambda masked_gradient, opt_state: opt.update(masked_gradient, opt_state))
+        # Function for updating the weight_dict from the optimizer
         optax_apply_updates_jitted = jit(lambda weight_dict, updates: optax.apply_updates(weight_dict, updates))
-
 
         if Path(self.save_dir).is_dir():
             weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(self.save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
@@ -177,16 +195,18 @@ class ModelTrainer:
             plt.ion()
         plots = helper.create_plots(self.n_space_dimension, self.n_eigenfuncs)
 
-
         pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1),disable = not show_progress)
         for epoch in pbar:
+            # Generate a random batch
             rng, sub_key = jax.random.split(rng)
             batch = jax.random.uniform(sub_key, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
 
+            # Sparsify the weights so that some of them are always 0 (to check)
             if self.sparsifying_K > 0:
                 weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
 
             weight_dict = weight_dict.unfreeze()
+
             # Run an optimization step over a training batch
             new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_update_jitted, opt_state, optax_apply_updates_jitted, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta)
             pbar.set_description('Loss {:.3f}'.format(np.around(np.asarray(new_loss), 3).item()))
@@ -194,11 +214,13 @@ class ModelTrainer:
             loss.append(new_loss)
             energies.append(new_energies)
 
+            # Run a callback function to decide whether to stop training
             if callback is not None:
                 to_stop = callback(epoch, energies=energies)
                 if to_stop == True:
                     return
 
+            # Save a check point
             if epoch % self.log_every == 0 or epoch == 1:
                 helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, self.npts, *plots)
                 plt.pause(.01)
