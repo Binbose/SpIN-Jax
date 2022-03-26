@@ -19,7 +19,7 @@ def second_difference_along_coordinate(weight_dict, fn, x , i, eps):
     coordinate[:,i] = 1
     return fn(weight_dict, x + coordinate * eps) + fn(weight_dict, x - coordinate * eps) - 2 * fn(weight_dict, x)
 
-def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system='hydrogen'):
+def hamiltonian_operator(fn, weight_dict, x, fn_x=None, nummerical_diff=True, eps=0.1, system='hydrogen'):
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()
     elif system == 'laplace':
@@ -29,7 +29,7 @@ def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system
 
 
     if fn_x is None:
-        fn_x = fn(x)
+        fn_x = fn(weight_dict, x)
     v_fn = v_fn(x)
     if len(v_fn.shape) != len(fn_x.shape):
         v_fn = v_fn[:, None]
@@ -38,14 +38,19 @@ def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system
     if nummerical_diff:
         differences = 0
         for i in range(x.shape[1]):
-            differences += second_difference_along_coordinate(fn, fn_x, x, i, eps)
+            differences += second_difference_along_coordinate(weight_dict, fn, x, i, eps)
         laplacian = differences / eps**2
 
     else:
-        laplacian = get_hessian_diagonals(fn, x).sum(-1)
+        hessian = jax.hessian(fn, argnums=1)
+        vectorized_hessian = vmap(hessian, in_axes=[None, 0])
+        laplacian = vectorized_hessian(weight_dict, x)
+        b, nefn, c = laplacian.shape[0], laplacian.shape[1], laplacian.shape[2]
+        laplacian = laplacian.reshape(b*nefn, c, c)
+        laplacian = vectorized_trace(laplacian).reshape(b, nefn)
 
 
-    return laplacian + v
+    return -laplacian + v
 
 
 def laplace_numerical(fn, eps=0.1):
