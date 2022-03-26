@@ -102,11 +102,8 @@ def calculate_masked_gradient(model_apply_jitted, weight_dict, batch, del_u_del_
             model_apply_jitted(weight_dict, batch)), argnums=0)(
         weight_dict, batch)
 
-
-
     sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=moving_average_beta)
     sigma_jac_bar = jax.tree_multimap(lambda sigma_jac_bar, sigma_jac: moving_average(sigma_jac_bar, sigma_jac, beta=moving_average_beta), sigma_jac_bar, sigma_jac_hat)
-
     pi_t_hat = np.mean(pred[:, :, None]@h_u[:, :, None].swapaxes(2, 1), axis=0)
     # pi_t_hat = lambda weight_dict, batch: covariance(
     #         model_apply_jitted(weight_dict, batch),
@@ -134,11 +131,10 @@ def calculate_masked_gradient(model_apply_jitted, weight_dict, batch, del_u_del_
 
     masked_grad = jax.tree_multimap(lambda j_pi, j_sigma: j_pi + j_sigma, d_trace_d_pi_hat_d_pi_d_weights, d_trace_d_sigma_bar_d_sigma_d_weights)
 
-    print(masked_grad['params']['Dense_0']['kernel'])
-    exit()
+    print(masked_grad['params']['Dense_1']['kernel'][0])
 
 
-    return FrozenDict(masked_grad), Lambda, L_inv, sigma_jac_bar
+    return FrozenDict(masked_grad), Lambda, L_inv, sigma_jac_bar, sigma_t_bar
 
 
 
@@ -150,13 +146,15 @@ def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_
     del_u_del_weights = jax.tree_multimap(lambda x: x.mean(0), del_u_del_weights)
 
     h_u = h_fn(weight_dict, batch, pred)
-    masked_gradient, Lambda, L_inv, j_sigma_t_bar = calculate_masked_gradient(model_apply_jitted,  weight_dict, batch, del_u_del_weights, pred, h_fn, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar)
+    masked_gradient, Lambda, L_inv, j_sigma_t_bar, sigma_t_bar = calculate_masked_gradient(model_apply_jitted,  weight_dict, batch, del_u_del_weights, pred, h_fn, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar)
+
 
     weight_dict = FrozenDict(weight_dict)
+    '''
     updates, opt_state = opt_update(masked_gradient, opt_state)
     weight_dict = optax_apply_updates(weight_dict, updates)
+    '''
     loss = jnp.trace(Lambda)
-
     energies = jnp.diag(Lambda)
 
     return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state
@@ -240,8 +238,11 @@ class ModelTrainer:
                 weight_dict['params'][key]['kernel'] = weights[i]
                 weight_dict['params'][key]['bias'] = biases[i]
             weight_dict = FrozenDict(weight_dict)
+
         pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1),disable = not show_progress)
         for epoch in pbar:
+            if epoch == 3:
+                exit()
             if debug:
                 batch = jnp.array([[.3, .2], [.3, .4], [.9, .3]])
             # else:
@@ -264,9 +265,9 @@ class ModelTrainer:
                 if to_stop == True:
                     return
 
-            if epoch % self.log_every == 0 or epoch == 1:
-                helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, *plots)
-                plt.pause(.01)
+            # if epoch % self.log_every == 0 or epoch == 1:
+            #     helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, *plots)
+            #     plt.pause(.01)
 
 
 if __name__ == "__main__":
