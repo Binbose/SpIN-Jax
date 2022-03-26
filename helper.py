@@ -114,6 +114,7 @@ def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=
 
 def create_plots(n_space_dimension, neig):
     energies_fig, energies_ax = plt.subplots(1, 1)
+    energies_ax.set_yscale('symlog')
     if n_space_dimension == 1:
         fig, ax = plt.subplots(1, 1)
         return fig, ax, energies_fig, energies_ax
@@ -166,6 +167,7 @@ def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimens
             energies_ax.fill_between(x, av-stdev/2, av+stdev/2, color=c, alpha=.5)
         if system == 'hydrogen':
             energies_ax.set_ylim(min(ground_truth)-.1, 0)
+        energies_ax.set_yscale('symlog')
         energies_ax.legend()
         energies_fig.savefig('{}/energies'.format(save_dir, save_dir))
 

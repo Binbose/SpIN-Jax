@@ -24,11 +24,13 @@ from jax import vmap
 import matplotlib.pyplot as plt
 
 debug = False
-debug = True
+# debug = True
 if debug:
     jax.disable_jit()
+    config.update('jax_platform_name', 'cpu')
+
 # config.update("jax_enable_x64", True)
-config.update('jax_platform_name', 'cpu')
+# config.update('jax_platform_name', 'cpu')
 # config.update("jax_debug_nans", True)
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
@@ -37,98 +39,28 @@ def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, 
     weight_dict = model.init(init_rng, batch)
     layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
 
-    #opt = optax.rmsprop(learning_rate, decay_rate)
-    opt = optax.adam(learning_rate, decay_rate)
+    opt = optax.rmsprop(learning_rate, decay_rate)
+    # opt = optax.adam(learning_rate, decay_rate)
     opt_state = opt.init(weight_dict)
 
     #opt_init, opt_update, get_params = optimizers.adam(learning_rate)
     #opt_state = opt_init(weight_dict)
     return model, weight_dict, opt, opt_state, layer_sparsifying_masks
 
-def get_network_as_function_of_input(model_apply, params):
-    return lambda batch: model_apply(params, batch)
+@jax.custom_vjp
+def covariance(u1, u2):
+    return jnp.mean(u1[:, :, None] @ u2[:, :, None].swapaxes(2, 1), axis=0)
 
-def get_network_as_function_of_weights(model_apply, batch):
-    return lambda weights: model_apply(weights, batch)
+def covariance_fwd(u1, u2):
+    return covariance(u1, u2), (u1, u2, u1.shape[0])
 
-def get_masked_gradient_function(A_1, A_2, moving_average_beta):
-    def _calculate_j_pi_t_hat(del_u_del_weights):
-        j_pi_t_hat = jnp.tensordot(A_1, del_u_del_weights, [[0, 1], [0, 1]])
+def covariance_bwd(res, g):
+    u1, u2, batch_size = res
+    return ((u2 @ g)/ batch_size, (u1 @ g)/ batch_size)
 
-        return j_pi_t_hat
-
-    def _calculate_j_sigma_t_bar(del_u_del_weights, j_sigma_t_bar):
-        j_sigma_t_hat = jnp.tensordot(A_2, del_u_del_weights, [[0, 1], [0, 1]])
-        j_sigma_t_bar = moving_average(j_sigma_t_bar, j_sigma_t_hat, moving_average_beta)
-
-        return j_sigma_t_bar
-
-    def _calculate_masked_gradient(j_pi_t_hat, j_sigma_t_bar):
-        masked_grad = (j_pi_t_hat - j_sigma_t_bar)
-        return masked_grad
-
-    return _calculate_j_pi_t_hat, _calculate_j_sigma_t_bar, _calculate_masked_gradient
-
-# This jit seems not making any difference
-# def calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar):
-#     sigma_t_hat = np.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
-#     pi_t_hat = np.mean(pred[:, :, None]@h_u[:, :, None].swapaxes(2, 1), axis=0)
-
-#     sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=moving_average_beta)
-
-#     def sigma_from_weights(weights):
-#         return np.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
-#     j_sigma_t_hat = jacrev()
-#     def loss_from_sigma(sigma):
-#         L = jnp.linalg.cholesky(sigma_t_bar)
-#         L_inv = jnp.linalg.inv(L)
-#         Lambda = L_inv @ pi_t_hat @ L_inv.T
-#         return jnp.trace(Lambda)
-    
-#     L = jnp.linalg.cholesky(sigma_t_bar)
-#     L_inv = jnp.linalg.inv(L)
-#     L_inv_T = L_inv.T
-#     L_diag_inv = jnp.eye(L.shape[0]) * (1/jnp.diag(L))
-    
-#     A_1 = L_inv_T @ L_diag_inv
-#     A_1 = h_u @ A_1
-    
-#     Lambda = L_inv @ pi_t_hat @ L_inv_T
-#     A_2 = L_inv_T @ jnp.triu(Lambda @ L_diag_inv)
-#     A_2 = pred @ A_2
-    
-#     _calculate_j_pi_t_hat, _calculate_j_sigma_t_bar, _calculate_masked_gradient = get_masked_gradient_function(A_1, A_2, moving_average_beta)
-#     j_pi_t_hat = jax.tree_multimap(_calculate_j_pi_t_hat, del_u_del_weights)
-#     j_sigma_t_bar = jax.tree_multimap(_calculate_j_sigma_t_bar, del_u_del_weights, j_sigma_t_bar)
-
-#     loss, sigma_back = jax.value_and_grad(loss_from_sigma)(sigma_t_bar)
-
-#     del_u_del_weights = jax.tree_multimap(_calculate_masked_gradient, j_pi_t_hat, j_sigma_t_bar)
-    
-#     masked_grad = jax.tree_multimap(lambda sig_jac, grad: jnp.tensordot(sigma_back, sig_jac, [[0,1],[0,1]]) + grad,
-#     j_sigma_t_bar, del_u_del_weights)
-
-#     return FrozenDict(masked_grad), Lambda, L_inv, j_sigma_t_bar
-
+covariance.defvjp(covariance_fwd, covariance_bwd)
+@partial(jit, static_argnums=(0,1,2,4,6))
 def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_update, opt_state, optax_apply_updates, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
-    # pred = model_apply_jitted(weight_dict, batch)
-
-    # del_u_del_weights = del_u_del_weights_fn(weight_dict, batch)
-
-    # h_u = h_fn(weight_dict, batch, pred)
-    # masked_gradient, Lambda, L_inv, j_sigma_t_bar = calculate_masked_gradient(del_u_del_weights, pred, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar)
-
-    # weight_dict = FrozenDict(weight_dict)
-    # updates, opt_state = opt_update(masked_gradient, opt_state)
-    # weight_dict = optax_apply_updates(weight_dict, updates)
-
-    # loss = jnp.trace(Lambda)
-    # energies = jnp.diag(Lambda)
-
-    # return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state
-
-    def covariance(x, y):
-        return jnp.mean(x[:, :, None]@y[:, :, None].swapaxes(2, 1), axis=0)
 
     def u_from_theta(theta):
         return model_apply_jitted(theta, batch)
@@ -136,65 +68,69 @@ def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_
     def sigma_from_theta(theta):
         u = u_from_theta(theta)
         return covariance(u, u), u
-    
-    def sigma_avg_from_theta(theta):
-        sigma_hat, u = sigma_from_theta(theta)
-        return moving_average(jax.lax.stop_gradient(sigma_t_bar), sigma_hat, moving_average_beta), u
 
+    def pi_from_theta(theta):
+        u = u_from_theta(theta)
+        h_u = h_fn(theta, batch, u)
+        return covariance(u, h_u), h_u
+    
     j_sigma_t_hat, u = jax.jacrev(sigma_from_theta, has_aux=True)(weight_dict)
     j_sigma_t_bar = jax.tree_multimap(
         lambda x, y: moving_average(x, y, moving_average_beta),
         j_sigma_t_bar, j_sigma_t_hat
     )
-    
-    def loss_from_sigma(sigma, u):
-        h_u = h_fn(weight_dict, batch, u)
-        pi = covariance(u, h_u)
-        L = jnp.linalg.cholesky(sigma)
-        L_inv = jnp.linalg.inv(L)
-        Lambda = L_inv @ pi @ L_inv.T
-        eigval = eigenvalues(sigma, pi)
-        return jnp.sum(eigval), (eigval, L_inv, Lambda)
 
-    def loss_from_theta(theta):
-        sigma_avg, u = sigma_avg_from_theta(theta)
-        loss, aux = loss_from_sigma(sigma_avg, u)
-        return loss, aux + (sigma_avg, u)
+    sigma = covariance(u, u)
+    sigma_t_bar = moving_average(sigma_t_bar, sigma, moving_average_beta)
 
-    @jax.custom_vjp
-    def eigenvalues(sigma, pi):
-        return eigenvalues_fwd(sigma, pi)[0]
-    
-    def eigenvalues_fwd(sigma, pi):
-        chol = jnp.linalg.cholesky(sigma)
-        choli = jnp.linalg.inv(chol)
-        rq = choli @ pi @ choli.T
-        eigval = jnp.diag(rq)
-        dl = jnp.diag(jnp.diag(choli))
-        triu = jnp.triu(rq @ dl)
-        dsigma = -(choli.T @ triu)
-        dpi = choli.T @ dl
-        return eigval, (dsigma, dpi)
-    
-    def eigenvalues_bwd(res, g):
-        dsigma, dpi = res
-        return dsigma * g, dpi * g
-    
-    eigenvalues.defvjp(eigenvalues_fwd, eigenvalues_bwd)
+    L = jnp.linalg.cholesky(sigma_t_bar)
+    L_inv = jnp.linalg.inv(L)
+
+    pi, f_vjp, h_u = jax.vjp(pi_from_theta, weight_dict, has_aux=True)
+
+    # J_pi = jax.jacrev(pi_from_theta)(weight_dict)
+
+    # A = L_inv.T @ jnp.diag(jnp.diag(L_inv))
+
+    # gradient_pi_1 = A.T @ h_u.T
+
+    # grad_u_from_weights = jax.jacrev(u_from_theta)(weight_dict)
+    # loss_grad = jnp.tensordot(gradient_pi_1, grad_u_from_weights['params']['Dense_0']['kernel'], [[0,1],[1,0]])
+
+
+
+    # def loss_from_theta(theta):
+    #     u = u_from_theta(theta)
+    #     sigma = covariance(u, u)
+    #     sigma_t_bar = moving_average(sigma_t_bar, sigma, moving_average_beta)
 
         
-    val, loss_back = jax.value_and_grad(loss_from_theta, has_aux=True)(weight_dict)
-    loss, aux = val
-    energies, L_inv, Lambda, sigma_t_bar, u = aux
-    sigma_back, _ = jax.grad(loss_from_sigma, has_aux=True)(sigma_t_bar, u)
 
-    gradients = jax.tree_multimap(lambda sig_jac, loss_grad: jnp.tensordot(sigma_back, sig_jac, [[0,1],[0,1]]) + loss_grad, j_sigma_t_bar, loss_back)
+
+    # def A_1_from_theta(theta):
+
+    A_1_J_pi, = f_vjp(L_inv.T @ jnp.diag(jnp.diag(L_inv)))
+
+    Lambda = L_inv @ pi @ L_inv.T
+
+    energies = jnp.diag(Lambda)
+
+    loss = jnp.sum(energies)
+
+    A_2 = -L_inv.T @ jnp.triu(Lambda @ jnp.diag(jnp.diag(L_inv)))
+
+    # def flat_combine(sig_jac, weight, loss_grad):
+    #     neig = A_2.shape[0]
+    #     val = A_2.reshape(1, neig*neig) @ sig_jac.reshape(neig*neig, -1)
+    #     return val.reshape(weight.shape) + loss_grad
+    
+    gradients = jax.tree_multimap(lambda sig_jac, loss_pi_grad: jnp.tensordot(A_2, sig_jac, [[0,1],[0,1]]) + loss_pi_grad, j_sigma_t_bar, A_1_J_pi)
+    
+    # gradients = jax.tree_multimap(flat_combine, j_sigma_t_bar, weight_dict, A_1_J_pi)
 
     weight_dict = FrozenDict(weight_dict)
     gradients = FrozenDict(gradients)
     updates, opt_state = opt_update(gradients, opt_state)
-    # weight_dict = weight_dict.unfreeze()
-    # gradients = gradients.unfreeze()
     weight_dict = optax_apply_updates(weight_dict, updates)
     weight_dict = FrozenDict(weight_dict)
     return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state
@@ -216,17 +152,17 @@ class ModelTrainer:
         # Turn on/off real time plotting
         self.realtime_plots = True
         self.npts = 64
-        self.log_every = 1000
-        self.window = 100
+        self.log_every = 10000
+        self.window = 1000
 
         # Optimizer
         self.learning_rate = 1e-5
-        self.decay_rate = 0.999
-        self.moving_average_beta = 0.01
+        self.decay_rate = 0.01
+        self.moving_average_beta = .01
 
         # Train setup
-        self.num_epochs = 100000
-        self.batch_size = 128
+        self.num_epochs = 1000000
+        self.batch_size = 512
         self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
 
         # Simulation size
@@ -256,9 +192,10 @@ class ModelTrainer:
         optax_apply_updates_jitted = jit(lambda weight_dict, updates: optax.apply_updates(weight_dict, updates))
 
 
-        if Path(self.save_dir).is_dir():
-            weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(self.save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
-            loss, energies = np.load('{}/loss.npy'.format(self.save_dir)).tolist(), np.load('{}/energies.npy'.format(self.save_dir)).tolist()
+        if not debug:
+            if Path(self.save_dir).is_dir():
+                weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(self.save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
+                loss, energies = np.load('{}/loss.npy'.format(self.save_dir)).tolist(), np.load('{}/energies.npy'.format(self.save_dir)).tolist()
 
         if self.realtime_plots:
             plt.ion()
@@ -279,9 +216,9 @@ class ModelTrainer:
         for epoch in pbar:
             if debug:
                 batch = jnp.array([[.3, .2], [.3, .4], [.9, .3]])
-            # else:
-            # rng, subkey = jax.random.split(rng)
-            # batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
+            else:
+                rng, subkey = jax.random.split(rng)
+                batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
 
             if self.sparsifying_K > 0:
                 weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
