@@ -117,7 +117,6 @@ def calculate_masked_gradient(model_apply_jitted, weight_dict, batch, del_u_del_
     Lambda = L_inv @ pi_t_hat @ L_inv_T
 
 
-
     # pi
     d_trace_d_pi_hat = L_inv_T @ L_diag_inv
     pi_jac_hat = jax.jacrev(lambda weight_dict, batch: covariance(model_apply_jitted(weight_dict, batch), h_fn(weight_dict, batch, model_apply_jitted(weight_dict, batch))), argnums=0)(weight_dict, batch)
@@ -130,9 +129,6 @@ def calculate_masked_gradient(model_apply_jitted, weight_dict, batch, del_u_del_
     #A_2 = jnp.mean(pred, axis=0) @ d_trace_d_sigma_bar
 
     masked_grad = jax.tree_multimap(lambda j_pi, j_sigma: j_pi + j_sigma, d_trace_d_pi_hat_d_pi_d_weights, d_trace_d_sigma_bar_d_sigma_d_weights)
-
-    print(masked_grad['params']['Dense_1']['kernel'][0])
-
 
     return FrozenDict(masked_grad), Lambda, L_inv, sigma_jac_bar, sigma_t_bar
 
@@ -150,10 +146,9 @@ def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_
 
 
     weight_dict = FrozenDict(weight_dict)
-    '''
     updates, opt_state = opt_update(masked_gradient, opt_state)
     weight_dict = optax_apply_updates(weight_dict, updates)
-    '''
+
     loss = jnp.trace(Lambda)
     energies = jnp.diag(Lambda)
 
@@ -184,7 +179,7 @@ class ModelTrainer:
         # Optimizer
         self.learning_rate = 1e-5
         self.decay_rate = 0.999
-        self.moving_average_beta = 0.5
+        self.moving_average_beta = 0.01
 
         # Train setup
         self.num_epochs = 100000
@@ -239,9 +234,9 @@ class ModelTrainer:
                 weight_dict['params'][key]['bias'] = biases[i]
             weight_dict = FrozenDict(weight_dict)
 
-        pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1),disable = not show_progress)
+        pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1), disable=not show_progress)
         for epoch in pbar:
-            if epoch == 3:
+            if epoch == 1000+3:
                 exit()
             if debug:
                 batch = jnp.array([[.3, .2], [.3, .4], [.9, .3]])
@@ -249,6 +244,7 @@ class ModelTrainer:
             #rng, subkey = jax.random.split(rng)
             #batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
 
+            print(weight_dict['params']['Dense_0']['kernel'])
             if self.sparsifying_K > 0:
                 weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
 
