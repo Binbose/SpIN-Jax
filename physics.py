@@ -66,7 +66,7 @@ def laplace_numerical(fn, eps=0.1):
     return _laplace_numerical
 
 def construct_hamiltonian_function(fn, system='hydrogen', eps=0.0):
-    def _construct(weight_dict, x, fn_x):
+    def _construct(weight_dict, x):
         if eps==0.0:
             vectorized_hessian_result = vectorized_hessian(weight_dict, x)
             batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], \
@@ -76,7 +76,7 @@ def construct_hamiltonian_function(fn, system='hydrogen', eps=0.0):
         else:
             laplace = vectorized_hessian(weight_dict, x)
 
-        return -laplace + v_fn(x)[:,None] * fn_x
+        return -laplace + v_fn(x)[:,None] * fn(weight_dict, x)
         # return v_fn(x)[:,None] * fn_x
 
     if system == 'hydrogen':

@@ -138,18 +138,3 @@ class EigenNet(nn.Module):
         weight_dict = FrozenDict(weight_dict)
         return weight_dict
 
-
-if __name__ == '__main__':
-    D = 50
-    sparsifying_K = 3
-    n_eigenfuncs = 9
-    model = EigenNet(features=[128, 128, 128, n_eigenfuncs], D=D)
-    batch = jnp.ones((16, 2))
-    weight_dict = model.init(jax.random.PRNGKey(0), batch)
-    weight_list = [weight_dict['params'][key]['kernel']
-                   for key in weight_dict['params'].keys()]
-    layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(
-        weight_dict, sparsifying_K)
-    weight_dict = EigenNet.sparsify_weights(
-        weight_dict, layer_sparsifying_masks)
-    output = model.apply(weight_dict, batch)

@@ -18,20 +18,16 @@ from jax import jit
 from jax.config import config
 #from jax.example_libraries import optimizers
 from functools import partial
-from helper import vectorized_hessian
-from jax import vmap
-from physics import hamiltonian_operator
 from jax import custom_jvp, custom_vjp
 
 
 import matplotlib.pyplot as plt
 
 debug = False
-debug = True
 if debug:
     jax.disable_jit()
-config.update("jax_enable_x64", True)
-config.update('jax_platform_name', 'cpu')
+#config.update("jax_enable_x64", True)
+#config.update('jax_platform_name', 'cpu')
 # config.update("jax_debug_nans", True)
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
@@ -93,22 +89,16 @@ def covariance_bwd(res, g):
 covariance.defvjp(covariance_fwd, covariance_bwd)
 
 
+def calculate_masked_gradient(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, weight_dict, batch, sigma_t_bar, sigma_jac_bar, moving_average_beta):
+    pred = model_fn(weight_dict, batch)
+    h = h_fn(weight_dict, batch)
 
-def calculate_masked_gradient(model_apply_jitted, weight_dict, batch, del_u_del_weights, pred, h_fn, h_u, sigma_t_bar, moving_average_beta, sigma_jac_bar):
     sigma_t_hat = np.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
-    sigma_jac_hat = jax.jacrev(
-        lambda weight_dict, batch: covariance(
-            model_apply_jitted(weight_dict, batch),
-            model_apply_jitted(weight_dict, batch)), argnums=0)(
-        weight_dict, batch)
+    sigma_jac_hat = sigma_jac_fn(weight_dict, batch)
 
     sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=moving_average_beta)
     sigma_jac_bar = jax.tree_multimap(lambda sigma_jac_bar, sigma_jac: moving_average(sigma_jac_bar, sigma_jac, beta=moving_average_beta), sigma_jac_bar, sigma_jac_hat)
-    pi_t_hat = np.mean(pred[:, :, None]@h_u[:, :, None].swapaxes(2, 1), axis=0)
-    # pi_t_hat = lambda weight_dict, batch: covariance(
-    #         model_apply_jitted(weight_dict, batch),
-    #         h_fn(weight_dict, batch, model_apply_jitted(weight_dict, batch)))
-
+    pi_t_hat = np.mean(pred[:, :, None]@h[:, :, None].swapaxes(2, 1), axis=0)
 
     L = jnp.linalg.cholesky(sigma_t_bar)
     L_inv = jnp.linalg.inv(L)
@@ -117,16 +107,13 @@ def calculate_masked_gradient(model_apply_jitted, weight_dict, batch, del_u_del_
     Lambda = L_inv @ pi_t_hat @ L_inv_T
 
 
-    # pi
-    d_trace_d_pi_hat = L_inv_T @ L_diag_inv
-    pi_jac_hat = jax.jacrev(lambda weight_dict, batch: covariance(model_apply_jitted(weight_dict, batch), h_fn(weight_dict, batch, model_apply_jitted(weight_dict, batch))), argnums=0)(weight_dict, batch)
-    d_trace_d_pi_hat_d_pi_d_weights = jax.tree_multimap(lambda pi_j: jnp.tensordot(d_trace_d_pi_hat, pi_j, [[0,1], [0,1]]), pi_jac_hat)
-    #A_1 = jnp.mean(h_u, axis=0) @ A_1.T
 
-    # sigma
+    d_trace_d_pi_hat = L_inv_T @ L_diag_inv
+    pi_jac_hat = pi_jac_fn(weight_dict, batch)
+    d_trace_d_pi_hat_d_pi_d_weights = jax.tree_multimap(lambda pi_j: jnp.tensordot(d_trace_d_pi_hat, pi_j, [[0,1], [0,1]]), pi_jac_hat)
+
     d_trace_d_sigma_bar = -L_inv_T @ jnp.triu(Lambda @ L_diag_inv)
     d_trace_d_sigma_bar_d_sigma_d_weights = jax.tree_multimap(lambda j_sigma: jnp.tensordot(d_trace_d_sigma_bar, j_sigma, [[0,1], [0,1]]), sigma_jac_bar)
-    #A_2 = jnp.mean(pred, axis=0) @ d_trace_d_sigma_bar
 
     masked_grad = jax.tree_multimap(lambda j_pi, j_sigma: j_pi + j_sigma, d_trace_d_pi_hat_d_pi_d_weights, d_trace_d_sigma_bar_d_sigma_d_weights)
 
@@ -134,16 +121,10 @@ def calculate_masked_gradient(model_apply_jitted, weight_dict, batch, del_u_del_
 
 
 
+@partial(jit, static_argnums=(0,1,2,3,4,5, 11))
+def train_step(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, opt_update, optax_apply_updates, opt_state, weight_dict, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
 
-def train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_update, opt_state, optax_apply_updates, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta, system):
-    pred = model_apply_jitted(weight_dict, batch)
-
-    del_u_del_weights = del_u_del_weights_fn(weight_dict, batch)
-    del_u_del_weights = jax.tree_multimap(lambda x: x.mean(0), del_u_del_weights)
-
-    h_u = h_fn(weight_dict, batch, pred)
-    masked_gradient, Lambda, L_inv, j_sigma_t_bar, sigma_t_bar = calculate_masked_gradient(model_apply_jitted,  weight_dict, batch, del_u_del_weights, pred, h_fn, h_u, sigma_t_bar, moving_average_beta, j_sigma_t_bar)
-
+    masked_gradient, Lambda, L_inv, j_sigma_t_bar, sigma_t_bar = calculate_masked_gradient(model_fn,  h_fn, sigma_jac_fn, pi_jac_fn, weight_dict, batch , sigma_t_bar, j_sigma_t_bar, moving_average_beta)
 
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt_update(masked_gradient, opt_state)
@@ -166,14 +147,14 @@ class ModelTrainer:
         self.charge = 1
 
         # Network parameter
-        self.sparsifying_K = 0
+        self.sparsifying_K = 5
         self.n_dense_neurons = [128, 128, 128]
         self.n_eigenfuncs = 4
 
         # Turn on/off real time plotting
         self.realtime_plots = True
-        self.npts = 64
-        self.log_every = 1000
+        self.n_plotting = 200
+        self.log_every = 20000
         self.window = 100
 
         # Optimizer
@@ -182,7 +163,7 @@ class ModelTrainer:
         self.moving_average_beta = 0.01
 
         # Train setup
-        self.num_epochs = 100000
+        self.num_epochs = 200000
         self.batch_size = 128
         self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
 
@@ -190,10 +171,10 @@ class ModelTrainer:
         self.D_min = -50
         self.D_max = 50
         if (self.system, self.n_space_dimension) == ('hydrogen', 2):
-            self.D_min = -50
-            self.D_max = 50
+            self.D_min = -25
+            self.D_max = 25
 
-    def start_training(self, show_progress = True, callback = None):
+    def start_training(self, show_progress=True, callback=None):
         rng = jax.random.PRNGKey(1)
         rng, init_rng = jax.random.split(rng)
         # Create initial state
@@ -207,16 +188,17 @@ class ModelTrainer:
         loss = []
         energies = []
 
-        model_apply_jitted = jit(lambda params, inputs: model.apply(params, inputs))
-        h_fn = jit(construct_hamiltonian_function(model_apply_jitted, system=self.system, eps=0.0))
-        del_u_del_weights_fn = jit(jacrev(model_apply_jitted, argnums=0))
-        opt_update_jitted = jit(lambda masked_gradient, opt_state: opt.update(masked_gradient, opt_state))
-        optax_apply_updates_jitted = jit(lambda weight_dict, updates: optax.apply_updates(weight_dict, updates))
+        model_fn = lambda params, inputs: model.apply(params, inputs)
+        h_fn = construct_hamiltonian_function(model_fn, system=self.system, eps=0.0)
+        sigma_jac_fn = jax.jacrev(lambda weight_dict, batch: covariance(model_fn(weight_dict, batch), model_fn(weight_dict, batch)), argnums=0)
+        pi_jac_fn = jax.jacrev(lambda weight_dict, batch: covariance(model_fn(weight_dict, batch), h_fn(weight_dict, batch)), argnums=0)
+        opt_update_jitted = lambda masked_gradient, opt_state: opt.update(masked_gradient, opt_state)
+        optax_apply_updates_jitted = lambda weight_dict, updates: optax.apply_updates(weight_dict, updates)
 
 
-        # if Path(self.save_dir).is_dir():
-        #     weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(self.save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
-        #     loss, energies = np.load('{}/loss.npy'.format(self.save_dir)).tolist(), np.load('{}/energies.npy'.format(self.save_dir)).tolist()
+        if Path(self.save_dir).is_dir():
+            weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(self.save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
+            loss, energies = np.load('{}/loss.npy'.format(self.save_dir)).tolist(), np.load('{}/energies.npy'.format(self.save_dir)).tolist()
 
         if self.realtime_plots:
             plt.ion()
@@ -236,21 +218,18 @@ class ModelTrainer:
 
         pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1), disable=not show_progress)
         for epoch in pbar:
-            if epoch == 1000+3:
-                exit()
             if debug:
                 batch = jnp.array([[.3, .2], [.3, .4], [.9, .3]])
-            # else:
-            #rng, subkey = jax.random.split(rng)
-            #batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
+            else:
+                rng, subkey = jax.random.split(rng)
+                batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
 
-            print(weight_dict['params']['Dense_0']['kernel'])
             if self.sparsifying_K > 0:
                 weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
 
             weight_dict = weight_dict.unfreeze()
             # Run an optimization step over a training batch
-            new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, del_u_del_weights_fn, h_fn, weight_dict, opt_update_jitted, opt_state, optax_apply_updates_jitted, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta, self.system)
+            new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, opt_update_jitted, optax_apply_updates_jitted, opt_state, weight_dict, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta)
             pbar.set_description('Loss {:.3f}'.format(np.around(np.asarray(new_loss), 3).item()))
 
             loss.append(new_loss)
@@ -261,9 +240,9 @@ class ModelTrainer:
                 if to_stop == True:
                     return
 
-            # if epoch % self.log_every == 0 or epoch == 1:
-            #     helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, *plots)
-            #     plt.pause(.01)
+            if epoch % self.log_every == 0 or epoch == 1:
+                helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, self.n_plotting, *plots)
+                plt.pause(.01)
 
 
 if __name__ == "__main__":
