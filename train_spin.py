@@ -121,10 +121,11 @@ def calculate_masked_gradient(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, weight_di
 
 
 
-@partial(jit, static_argnums=(0,1,2,3,4,5, 11))
+@partial(jit, static_argnums=(0,1,2,3,4,5,11))
 def train_step(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, opt_update, optax_apply_updates, opt_state, weight_dict, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
 
     masked_gradient, Lambda, L_inv, j_sigma_t_bar, sigma_t_bar = calculate_masked_gradient(model_fn,  h_fn, sigma_jac_fn, pi_jac_fn, weight_dict, batch , sigma_t_bar, j_sigma_t_bar, moving_average_beta)
+
 
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt_update(masked_gradient, opt_state)
@@ -134,6 +135,27 @@ def train_step(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, opt_update, optax_apply_
     energies = jnp.diag(Lambda)
 
     return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state
+
+@partial(jit, static_argnums=(0,))
+def pretrain_loss(model_fn, weight_dict, batch):
+    pred = model_fn(weight_dict, batch)
+    cov = np.mean(pred[:, :, None] @ pred[:, :, None].swapaxes(2, 1), axis=0)
+    loss = cov - jnp.eye(cov.shape[0])
+
+    return loss.sum()
+
+
+def pre_train_step(model_fn, loss_grad, opt_update, optax_apply_updates, opt_state, weight_dict, batch):
+    loss = pretrain_loss(model_fn, weight_dict, batch)
+    pretrain_loss_grad = loss_grad#grad(pretrain_loss, argnums=1)
+
+    weight_dict = FrozenDict(weight_dict)
+    updates, opt_state = opt_update(pretrain_loss_grad, opt_state)
+    weight_dict = optax_apply_updates(weight_dict, updates)
+
+
+
+    return loss, weight_dict, opt_state
 
 
 
@@ -154,7 +176,7 @@ class ModelTrainer:
         # Turn on/off real time plotting
         self.realtime_plots = True
         self.n_plotting = 200
-        self.log_every = 20000
+        self.log_every = 200
         self.window = 100
 
         # Optimizer
