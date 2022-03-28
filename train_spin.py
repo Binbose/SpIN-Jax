@@ -94,11 +94,14 @@ def calculate_masked_gradient(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, weight_di
     h = h_fn(weight_dict, batch)
 
     sigma_t_hat = np.mean(pred[:, :, None]@pred[:, :, None].swapaxes(2, 1), axis=0)
+    # print('Sigma eigvals ', np.linalg.eigvals(sigma_t_hat))
     sigma_jac_hat = sigma_jac_fn(weight_dict, batch)
 
     sigma_t_bar = moving_average(sigma_t_bar, sigma_t_hat, beta=moving_average_beta)
     sigma_jac_bar = jax.tree_multimap(lambda sigma_jac_bar, sigma_jac: moving_average(sigma_jac_bar, sigma_jac, beta=moving_average_beta), sigma_jac_bar, sigma_jac_hat)
     pi_t_hat = np.mean(pred[:, :, None]@h[:, :, None].swapaxes(2, 1), axis=0)
+    # print('Pi eigvals ', np.linalg.eigvals(pi_t_hat))
+    # exit()
 
     L = jnp.linalg.cholesky(sigma_t_bar)
     L_inv = jnp.linalg.inv(L)
@@ -123,10 +126,9 @@ def calculate_masked_gradient(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, weight_di
 
 @partial(jit, static_argnums=(0,1,2,3,4,5,11))
 def train_step(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, opt_update, optax_apply_updates, opt_state, weight_dict, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
-
     masked_gradient, Lambda, L_inv, j_sigma_t_bar, sigma_t_bar = calculate_masked_gradient(model_fn,  h_fn, sigma_jac_fn, pi_jac_fn, weight_dict, batch , sigma_t_bar, j_sigma_t_bar, moving_average_beta)
 
-
+    masked_gradient = FrozenDict(masked_gradient)
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt_update(masked_gradient, opt_state)
     weight_dict = optax_apply_updates(weight_dict, updates)
@@ -136,24 +138,24 @@ def train_step(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, opt_update, optax_apply_
 
     return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state
 
-@partial(jit, static_argnums=(0,))
+
 def pretrain_loss(model_fn, weight_dict, batch):
     pred = model_fn(weight_dict, batch)
     cov = np.mean(pred[:, :, None] @ pred[:, :, None].swapaxes(2, 1), axis=0)
-    loss = cov - jnp.eye(cov.shape[0])
+    #print(cov)
+
+    loss = (cov - jnp.eye(cov.shape[0]))**2
 
     return loss.sum()
 
-
-def pre_train_step(model_fn, loss_grad, opt_update, optax_apply_updates, opt_state, weight_dict, batch):
+@partial(jit, static_argnums=(0,1,2,3))
+def pretrain_step(model_fn, loss_grad, opt_update, optax_apply_updates, opt_state, weight_dict, batch):
     loss = pretrain_loss(model_fn, weight_dict, batch)
-    pretrain_loss_grad = loss_grad#grad(pretrain_loss, argnums=1)
+    pretrain_loss_grad = FrozenDict(loss_grad(weight_dict, batch))
 
     weight_dict = FrozenDict(weight_dict)
     updates, opt_state = opt_update(pretrain_loss_grad, opt_state)
     weight_dict = optax_apply_updates(weight_dict, updates)
-
-
 
     return loss, weight_dict, opt_state
 
@@ -169,15 +171,15 @@ class ModelTrainer:
         self.charge = 1
 
         # Network parameter
-        self.sparsifying_K = 5
+        self.sparsifying_K = 0
         self.n_dense_neurons = [128, 128, 128]
         self.n_eigenfuncs = 4
 
         # Turn on/off real time plotting
         self.realtime_plots = True
         self.n_plotting = 200
-        self.log_every = 200
-        self.window = 100
+        self.log_every = 20000
+        self.window = 1000
 
         # Optimizer
         self.learning_rate = 1e-5
@@ -186,7 +188,7 @@ class ModelTrainer:
 
         # Train setup
         self.num_epochs = 200000
-        self.batch_size = 128
+        self.batch_size = 512
         self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
 
         # Simulation size
@@ -201,10 +203,10 @@ class ModelTrainer:
         rng, init_rng = jax.random.split(rng)
         # Create initial state
         model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(self.n_dense_neurons, self.n_eigenfuncs, self.batch_size, self.D_min, self.D_max, self.learning_rate, self.decay_rate, self.sparsifying_K, n_space_dimension=self.n_space_dimension, init_rng=init_rng)
-
+        weight_dict = weight_dict.unfreeze()
 
         sigma_t_bar = jnp.eye(self.n_eigenfuncs)
-        j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros((self.n_eigenfuncs, self.n_eigenfuncs) + x.shape), weight_dict).unfreeze()
+        j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros((self.n_eigenfuncs, self.n_eigenfuncs) + x.shape), weight_dict)
         #j_sigma_t_bar = jax.tree_multimap(lambda x: jnp.zeros_like(x), weight_dict).unfreeze()
         start_epoch = 0
         loss = []
@@ -214,8 +216,12 @@ class ModelTrainer:
         h_fn = construct_hamiltonian_function(model_fn, system=self.system, eps=0.0)
         sigma_jac_fn = jax.jacrev(lambda weight_dict, batch: covariance(model_fn(weight_dict, batch), model_fn(weight_dict, batch)), argnums=0)
         pi_jac_fn = jax.jacrev(lambda weight_dict, batch: covariance(model_fn(weight_dict, batch), h_fn(weight_dict, batch)), argnums=0)
-        opt_update_jitted = lambda masked_gradient, opt_state: opt.update(masked_gradient, opt_state)
-        optax_apply_updates_jitted = lambda weight_dict, updates: optax.apply_updates(weight_dict, updates)
+        opt_update= lambda masked_gradient, opt_state: opt.update(masked_gradient, opt_state)
+        optax_apply_updates = lambda weight_dict, updates: optax.apply_updates(weight_dict, updates)
+
+        #pretraining
+        pretrain_epochs = 0
+        pretrain_loss_grad = jax.jacrev(lambda weight_dict, batch: pretrain_loss(model_fn, weight_dict, batch), argnums=0)
 
 
         if Path(self.save_dir).is_dir():
@@ -227,35 +233,53 @@ class ModelTrainer:
         plots = helper.create_plots(self.n_space_dimension, self.n_eigenfuncs)
 
 
-        if debug:
-            import pickle
-            weights = pickle.load(open('weights.pkl', 'rb'))
-            biases = pickle.load(open('biases.pkl', 'rb'))
-
-            weight_dict = weight_dict.unfreeze()
-            for i, key in enumerate(weight_dict['params'].keys()):
-                weight_dict['params'][key]['kernel'] = weights[i]
-                weight_dict['params'][key]['bias'] = biases[i]
-            weight_dict = FrozenDict(weight_dict)
+        # if debug:
+        #     import pickle
+        #     weights = pickle.load(open('weights.pkl', 'rb'))
+        #     biases = pickle.load(open('biases.pkl', 'rb'))
+        #
+        #     weight_dict = weight_dict.unfreeze()
+        #     for i, key in enumerate(weight_dict['params'].keys()):
+        #         weight_dict['params'][key]['kernel'] = weights[i]
+        #         weight_dict['params'][key]['bias'] = biases[i]
+        #     weight_dict = FrozenDict(weight_dict)
 
         pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1), disable=not show_progress)
         for epoch in pbar:
-            if debug:
-                batch = jnp.array([[.3, .2], [.3, .4], [.9, .3]])
-            else:
-                rng, subkey = jax.random.split(rng)
-                batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
+            # if debug:
+            #     batch = jnp.array([[.3, .2], [.3, .4], [.9, .3]])
+            # else:
+            rng, subkey = jax.random.split(rng)
+            # batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
+            batch = jax.random.truncated_normal(subkey, lower=self.D_min / (np.sqrt(self.D_max) *2), upper=self.D_max / (np.sqrt(self.D_max) *2),
+                                       shape=(self.batch_size, self.n_space_dimension)) * (np.sqrt(self.D_max) *2)
+            # plt.scatter(batch[:,0], batch[:,1], s = 0.1)
+            # plt.show()
+            # exit()
+
+
+            if type(weight_dict) == FrozenDict:
+                weight_dict = weight_dict.unfreeze()
 
             if self.sparsifying_K > 0:
                 weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
 
-            weight_dict = weight_dict.unfreeze()
-            # Run an optimization step over a training batch
-            new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, opt_update_jitted, optax_apply_updates_jitted, opt_state, weight_dict, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta)
-            pbar.set_description('Loss {:.3f}'.format(np.around(np.asarray(new_loss), 3).item()))
+
+            if epoch < pretrain_epochs:
+                new_loss, weight_dict, opt_state = pretrain_step(model_fn, pretrain_loss_grad, opt_update, optax_apply_updates, opt_state, weight_dict, batch)
+                L_inv = jnp.eye(self.n_eigenfuncs)
+                new_energies = [0,0,0,0]
+            else:
+                if epoch == pretrain_epochs:
+                    loss = []
+                    energies = []
+                new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, opt_update, optax_apply_updates, opt_state, weight_dict, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta)
 
             loss.append(new_loss)
             energies.append(new_energies)
+
+            pbar.set_description('Loss {:.3f}'.format(np.around(np.asarray(new_loss), 3).item()))
+
 
             if callback is not None:
                 to_stop = callback(epoch, energies=energies)

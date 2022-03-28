@@ -33,7 +33,7 @@ class EigenNet(nn.Module):
         else:
             L_inv = None
         x = x_in
-        x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
+        #x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
 
         '''
         activation = jax.nn.sigmoid
@@ -71,7 +71,7 @@ class EigenNet(nn.Module):
             # Mask with gaussian instead to satisfy boundary condition \psi(x) -> 0 for x -> \infty
             # Standard deviation of gaussian is learnable
             mean = (self.D_max + self.D_min) / 2
-            sigma = jnp.max(jnp.array([self.D_max, self.D_min])) / 4
+            sigma = jnp.max(jnp.array([self.D_max, self.D_min])) / 3
 
             #embedding = jnp.abs(nn.Embed(1, self.features[-1], embedding_init=constant(sigma))(jnp.eye(1, dtype='int32')))
             #sigma = (embedding * jnp.eye(k))[0]
@@ -131,10 +131,10 @@ class EigenNet(nn.Module):
 
     @staticmethod
     def sparsify_weights(weight_dict, layer_sparsifying_masks):
-        weight_dict = weight_dict.unfreeze()
+        if type(weight_dict) == FrozenDict:
+            weight_dict = weight_dict.unfreeze()
         for key, sparsifying_layer_mask in zip(weight_dict['params'].keys(), layer_sparsifying_masks):
             weight_dict['params'][key]['kernel'] = weight_dict['params'][key]['kernel'] * sparsifying_layer_mask
 
-        weight_dict = FrozenDict(weight_dict)
         return weight_dict
 
