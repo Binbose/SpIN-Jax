@@ -57,6 +57,7 @@ class EigenNet(nn.Module):
             x = nn.Dense(feat, use_bias=use_bias, kernel_init=initilization())(x)
             x = activation(x)
         x = nn.Dense(self.features[-1], use_bias=use_bias, kernel_init=initilization())(x)
+        
 
         if self.mask_type == 'quadratic':
             # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition \psi(D_max) = 0 and \psi(D_min) = 0
@@ -64,7 +65,7 @@ class EigenNet(nn.Module):
             D_avg = (self.D_max + self.D_min) / 2
             lim = self.D_max - D_avg
             d = (jnp.sqrt(2 * lim ** 2 - (x_in - D_avg) ** 2) - lim) / lim
-            d = jnp.prod(d, axis=-1, keepdims=True)
+            d = jnp.prod(d, axis=-1, keepdims=True) 
             x = x * d
         elif self.mask_type == 'exp':
             # Mask with gaussian instead to satisfy boundary condition \psi(x) -> 0 for x -> \infty
@@ -142,18 +143,3 @@ class EigenNet(nn.Module):
         weight_dict = FrozenDict(weight_dict)
         return weight_dict
 
-
-if __name__ == '__main__':
-    D = 50
-    sparsifying_K = 3
-    n_eigenfuncs = 9
-    model = EigenNet(features=[128, 128, 128, n_eigenfuncs], D=D)
-    batch = jnp.ones((16, 2))
-    weight_dict = model.init(jax.random.PRNGKey(0), batch)
-    weight_list = [weight_dict['params'][key]['kernel']
-                   for key in weight_dict['params'].keys()]
-    layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(
-        weight_dict, sparsifying_K)
-    weight_dict = EigenNet.sparsify_weights(
-        weight_dict, layer_sparsifying_masks)
-    output = model.apply(weight_dict, batch)
