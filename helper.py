@@ -11,6 +11,7 @@ from jax import vmap
 from jax import jacfwd
 from jax import jit
 from functools import partial
+from matplotlib.ticker import StrMethodFormatter, NullFormatter
 
 def vectorized_diagonal(m):
     return vmap(jnp.diag)(m)
@@ -167,6 +168,10 @@ def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimens
         if system == 'hydrogen':
             energies_ax.set_ylim(min(ground_truth)-.1, 0)
         energies_ax.legend()
+        energies_ax.set_yscale('symlog', linthresh=.1)
+        energies_ax.set_yticks([0.0] + ground_truth.tolist())
+        energies_ax.minorticks_off()
+        energies_ax.yaxis.set_major_formatter(StrMethodFormatter('{x:.3f}'))
         energies_fig.savefig('{}/energies'.format(save_dir, save_dir))
 
         fig, ax = plt.subplots()
