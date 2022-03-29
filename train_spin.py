@@ -28,7 +28,7 @@ if debug:
     jax.disable_jit()
 #config.update("jax_enable_x64", True)
 #config.update('jax_platform_name', 'cpu')
-# config.update("jax_debug_nans", True)
+config.update("jax_debug_nans", True)
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
     model = EigenNet(features=n_dense_neurons + [n_eigenfuncs], D_min=D_min, D_max=D_max)
@@ -188,7 +188,7 @@ class ModelTrainer:
 
         # Train setup
         self.num_epochs = 200000
-        self.batch_size = 512
+        self.batch_size = 128
         self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
 
         # Simulation size
