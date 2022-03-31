@@ -168,18 +168,6 @@ class ModelTrainer:
             plt.ion()
         plots = helper.create_plots(self.n_space_dimension, self.n_eigenfuncs)
 
-
-        if debug:
-            import pickle
-            weights = pickle.load(open('weights.pkl', 'rb'))
-            biases = pickle.load(open('biases.pkl', 'rb'))
-
-            weight_dict = weight_dict.unfreeze()
-            for i, key in enumerate(weight_dict['params'].keys()):
-                weight_dict['params'][key]['kernel'] = weights[i]
-                weight_dict['params'][key]['bias'] = biases[i]
-            weight_dict = FrozenDict(weight_dict)
-
         pbar = tqdm(range(start_epoch+1, start_epoch+self.num_epochs+1), disable=not show_progress)
         for epoch in pbar:
             # Generate a random batch
