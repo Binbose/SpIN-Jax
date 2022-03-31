@@ -10,7 +10,7 @@ from helper import compute_hessian_diagonals, vectorized_diagonal, vectorized_tr
 def get_hydrogen_potential():
 
     def hygrogen_potential(x):
-        return - 1/jnp.linalg.norm(x + 1e-7, axis=-1)
+        return - 1/jnp.linalg.norm(x, axis=-1)
 
     return hygrogen_potential
 

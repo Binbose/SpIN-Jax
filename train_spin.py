@@ -36,7 +36,7 @@ def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, 
     weight_dict = model.init(init_rng, batch)
     layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
 
-    #opt = optax.rmsprop(learning_rate, decay_rate)
+    # opt = optax.rmsprop(learning_rate, decay_rate)
     opt = optax.adam(learning_rate, decay_rate)
     opt_state = opt.init(weight_dict)
 
@@ -142,7 +142,6 @@ def train_step(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, opt_update, optax_apply_
 def pretrain_loss(model_fn, weight_dict, batch):
     pred = model_fn(weight_dict, batch)
     cov = np.mean(pred[:, :, None] @ pred[:, :, None].swapaxes(2, 1), axis=0)
-    #print(cov)
 
     loss = (cov - jnp.eye(cov.shape[0]))**2
 
@@ -171,7 +170,7 @@ class ModelTrainer:
         self.charge = 1
 
         # Network parameter
-        self.sparsifying_K = 0
+        self.sparsifying_K = 5
         self.n_dense_neurons = [128, 128, 128]
         self.n_eigenfuncs = 4
 
@@ -182,14 +181,14 @@ class ModelTrainer:
         self.window = 1000
 
         # Optimizer
-        self.learning_rate = 1e-5
+        self.learning_rate = 1e-4
         self.decay_rate = 0.999
         self.moving_average_beta = 0.01
 
         # Train setup
-        self.num_epochs = 200000
+        self.num_epochs =150000
         self.batch_size = 128
-        self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
+        self.save_dir = './results/normalized_hlr_pt_K5_{}_{}d'.format(self.system, self.n_space_dimension)
 
         # Simulation size
         self.D_min = -50
@@ -220,7 +219,7 @@ class ModelTrainer:
         optax_apply_updates = lambda weight_dict, updates: optax.apply_updates(weight_dict, updates)
 
         #pretraining
-        pretrain_epochs = 0
+        pretrain_epochs = 50000
         pretrain_loss_grad = jax.jacrev(lambda weight_dict, batch: pretrain_loss(model_fn, weight_dict, batch), argnums=0)
 
 
@@ -252,7 +251,7 @@ class ModelTrainer:
             rng, subkey = jax.random.split(rng)
             # batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
             batch = jax.random.truncated_normal(subkey, lower=self.D_min / (np.sqrt(self.D_max) *2), upper=self.D_max / (np.sqrt(self.D_max) *2),
-                                       shape=(self.batch_size, self.n_space_dimension)) * (np.sqrt(self.D_max) *2)
+                                                shape=(self.batch_size, self.n_space_dimension)) * (np.sqrt(self.D_max) *2)
             # plt.scatter(batch[:,0], batch[:,1], s = 0.1)
             # plt.show()
             # exit()
@@ -268,15 +267,15 @@ class ModelTrainer:
             if epoch < pretrain_epochs:
                 new_loss, weight_dict, opt_state = pretrain_step(model_fn, pretrain_loss_grad, opt_update, optax_apply_updates, opt_state, weight_dict, batch)
                 L_inv = jnp.eye(self.n_eigenfuncs)
-                new_energies = [0,0,0,0]
             else:
-                if epoch == pretrain_epochs:
-                    loss = []
-                    energies = []
                 new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, opt_update, optax_apply_updates, opt_state, weight_dict, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta)
 
-            loss.append(new_loss)
-            energies.append(new_energies)
+                loss.append(new_loss)
+                energies.append(new_energies)
+
+                if epoch % self.log_every == 0 or epoch == 1:
+                    helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch-pretrain_epochs, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, self.n_plotting, *plots)
+                    plt.pause(.01)
 
             pbar.set_description('Loss {:.3f}'.format(np.around(np.asarray(new_loss), 3).item()))
 
@@ -286,9 +285,6 @@ class ModelTrainer:
                 if to_stop == True:
                     return
 
-            if epoch % self.log_every == 0 or epoch == 1:
-                helper.create_checkpoint(self.save_dir, model, weight_dict, self.D_min, self.D_max, self.n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, self.n_eigenfuncs, self.charge, self.system, L_inv, self.window, self.n_plotting, *plots)
-                plt.pause(.01)
 
 
 if __name__ == "__main__":
