@@ -138,3 +138,6 @@ dmypy.json
 /.vscode
 
 /austin_saved
+
+./param_phase_diagram.py
+./param_phase_diagram_run.sh
