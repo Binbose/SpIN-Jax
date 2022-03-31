@@ -19,39 +19,11 @@ def second_difference_along_coordinate(weight_dict, fn, x , i, eps):
     coordinate[:,i] = 1
     return fn(weight_dict, x + coordinate * eps) + fn(weight_dict, x - coordinate * eps) - 2 * fn(weight_dict, x)
 
-def hamiltonian_operator(fn, x, fn_x=None, nummerical_diff=True, eps=0.1, system='hydrogen'):
-    if system == 'hydrogen':
-        v_fn = get_hydrogen_potential()
-    elif system == 'laplace':
-        v_fn = lambda x: 0*x.sum(-1)
-    else:
-        v_fn = lambda x: 0*x.sum(-1)
-
-
-    if fn_x is None:
-        fn_x = fn(x)
-    v_fn = v_fn(x)
-    if len(v_fn.shape) != len(fn_x.shape):
-        v_fn = v_fn[:, None]
-
-    v = v_fn * fn_x
-    if nummerical_diff:
-        differences = 0
-        for i in range(x.shape[1]):
-            differences += second_difference_along_coordinate(fn, fn_x, x, i, eps)
-        laplacian = differences / eps**2
-
-    else:
-        laplacian = get_hessian_diagonals(fn, x).sum(-1)
-
-
-    return laplacian + v
-
 
 def laplace_numerical(fn, eps=0.1):
     def _laplace_numerical(weight_dict, x):
         differences = 0
-        #for i in range(x.shape[1]):
+        
         for i in range(2):
             differences += second_difference_along_coordinate(weight_dict, fn, x, i, eps)
         laplacian = differences / eps ** 2
@@ -72,6 +44,7 @@ def construct_hamiltonian_function(fn, system='hydrogen', eps=0.0):
             laplace = vectorized_hessian(weight_dict, x)
 
         return -laplace + v_fn(x)[:,None] * fn_x
+        # return v_fn(x)[:,None] * fn_x
 
     if system == 'hydrogen':
         v_fn = get_hydrogen_potential()

@@ -297,7 +297,7 @@ def exact_eigenpairs_1d(x, n):
 
 
 # Problem setup
-ndim = 1
+ndim = 2
 neig = 4
 
 # Domain boundaries
