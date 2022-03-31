@@ -7,7 +7,7 @@ It is not the authors official tensorflow implementation which you can find [her
 but the results are very similar, and run thanks to jax's jit even a bit faster. However, at the moment it only supports Hamiltonian systems.
 If you are interested in general kernels you will need to add some small extra modifications.  
 
-Additionally, we provide a deep dive with a breakdown of the code, some extra explanations and additional experiments visualizations in this [colab notebook](https://colab.research.google.com/drive/1hRm3zbf8ptJ00dGKKTohtBL3WNIg7tEl?usp=sharing#scrollTo=0PiLKO_bQjvp).
+Additionally, we provide a deep dive with a breakdown of the code, some extra explanations and additional experiments and visualizations in this [colab notebook](https://colab.research.google.com/drive/1hRm3zbf8ptJ00dGKKTohtBL3WNIg7tEl?usp=sharing#scrollTo=0PiLKO_bQjvp).
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1hRm3zbf8ptJ00dGKKTohtBL3WNIg7tEl?usp=sharing#scrollTo=0PiLKO_bQjvp)
 
