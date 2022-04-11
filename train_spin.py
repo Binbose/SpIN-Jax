@@ -23,12 +23,13 @@ from jax import custom_jvp, custom_vjp
 import matplotlib.pyplot as plt
 
 debug = False
+# debug = True
 if debug:
     jax.disable_jit()
 #config.update("jax_enable_x64", True)
-#config.update('jax_platform_name', 'cpu')
+# config.update('jax_platform_name', 'cpu')
+# jax.disable_jit()
 # config.update("jax_debug_nans", True)
-
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
     model = EigenNet(features=n_dense_neurons + [n_eigenfuncs], D_min=D_min, D_max=D_max)
@@ -100,8 +101,6 @@ def train_step(model_apply_jitted, h_fn, weight_dict, opt_update, opt_state, opt
     weight_dict = FrozenDict(weight_dict)
     return loss, weight_dict, energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state
 
-
-
 class ModelTrainer:
     def __init__(self) -> None:
         # Hyperparameter
@@ -113,31 +112,33 @@ class ModelTrainer:
 
         # Network parameter
         self.sparsifying_K = 5
-        self.n_dense_neurons = [128, 128, 128]
-        self.n_eigenfuncs = 4
+        self.n_dense_neurons = [128, 128, 128, 128]
+        self.n_eigenfuncs = 9
 
         # Turn on/off real time plotting
         self.realtime_plots = True
         self.n_plotting = 200
-        self.log_every = 10000
-        self.window = 1000
+        self.log_every = 200
+        self.window = 100
 
         # Optimizer
-        self.learning_rate = 1e-5
+        self.learning_rate = 5e-5
         self.decay_rate = 0.999
-        self.moving_average_beta = 0.01
+        self.moving_average_beta = 0.05
 
         # Train setup
-        self.num_epochs = 200000
-        self.batch_size = 128
-        self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
+        self.num_epochs = 300000
+        self.batch_size = 256
+        # self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
+        # self.save_dir = './results/{}_{}d_K5_4layer_5e5_05_256'.format(self.system, self.n_space_dimension)
+        self.save_dir = './results/{}_{}test'.format(self.system, self.n_space_dimension)
 
         # Simulation size
         self.D_min = -50
         self.D_max = 50
         if (self.system, self.n_space_dimension) == ('hydrogen', 2):
-            self.D_min = -25
-            self.D_max = 25
+            self.D_min = -50
+            self.D_max = 50
 
     def start_training(self, show_progress=True, callback=None):
         """
@@ -158,13 +159,12 @@ class ModelTrainer:
 
         model_apply_jitted = jit(lambda params, inputs: model.apply(params, inputs))
         h_fn = jit(construct_hamiltonian_function(model_apply_jitted, system=self.system, eps=0.0))
-        del_u_del_weights_fn = jit(jacrev(model_apply_jitted, argnums=0))
         opt_update_jitted = jit(lambda masked_gradient, opt_state: opt.update(masked_gradient, opt_state))
         optax_apply_updates_jitted = jit(lambda weight_dict, updates: optax.apply_updates(weight_dict, updates))
 
-        if Path(self.save_dir).is_dir():
-            weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(self.save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
-            loss, energies = np.load('{}/loss.npy'.format(self.save_dir)).tolist(), np.load('{}/energies.npy'.format(self.save_dir)).tolist()
+        # if Path(self.save_dir).is_dir():
+        #     weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar = checkpoints.restore_checkpoint('{}/checkpoints/'.format(self.save_dir), (weight_dict, opt_state, start_epoch, sigma_t_bar, j_sigma_t_bar))
+        #     loss, energies = np.load('{}/loss.npy'.format(self.save_dir)).tolist(), np.load('{}/energies.npy'.format(self.save_dir)).tolist()
 
         if self.realtime_plots:
             plt.ion()

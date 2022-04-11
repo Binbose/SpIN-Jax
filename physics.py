@@ -36,8 +36,7 @@ def construct_hamiltonian_function(fn, system='hydrogen', eps=0.0):
     def _construct(weight_dict, x, fn_x):
         if eps==0.0:
             vectorized_hessian_result = vectorized_hessian(weight_dict, x)
-            batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape[0], vectorized_hessian_result.shape[1], \
-                                         vectorized_hessian_result.shape[2], vectorized_hessian_result.shape[3]
+            batch, n_eigenfunc, c1, c2 = vectorized_hessian_result.shape
             vectorized_hessian_result = vectorized_hessian_result.reshape(batch * n_eigenfunc, c1, c2)
             laplace = vectorized_trace(vectorized_hessian_result).reshape(batch, n_eigenfunc, -1)[:,:,0]
         else:
