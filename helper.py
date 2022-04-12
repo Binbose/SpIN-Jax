@@ -12,7 +12,7 @@ from jax import jacfwd
 from jax import jit
 from functools import partial
 from matplotlib.ticker import StrMethodFormatter, NullFormatter
-
+key = jax.random.PRNGKey(1)
 def vectorized_diagonal(m):
     return vmap(jnp.diag)(m)
 
@@ -123,6 +123,17 @@ def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=
         ax.set_title('Eigenfunction {}'.format(n_eigenfunc))
         # set the limits of the plot to the limits of the data
         ax.axis([x.min(), x.max(), y.min(), y.max()])
+    
+    # elif n_space_dimension == 3:
+    #     coordinates = jax.random.uniform(jax.random.PRNGKey(1), (N, 3), minval=-3, maxval=3)
+    #     if L_inv is not None:
+    #         cs = model(weight_dict, (coordinates, L_inv))
+    #     else:
+    #         cs = model(weight_dict, coordinates)
+        
+    #     xs, ys, zs = coordinates.T
+    #     ax.scatter(xs, ys, zs, s=1, c=cs)
+    #     ax.set_title('Eigenfunction {}'.format(n_eigenfunc))
 
 
 def create_plots(n_space_dimension, neig):
@@ -139,7 +150,11 @@ def create_plots(n_space_dimension, neig):
             ax.set_aspect('equal', adjustable='box')
         return psi_fig, psi_ax, energies_fig, energies_ax
     elif n_space_dimension == 3:
-        return None, None, energies_fig, energies_ax
+        nfig = max(2, int(np.ceil(np.sqrt(neig))))
+        psi_fig, psi_ax = plt.subplots(nfig, nfig, figsize=(10, 10), subplot_kw={"projection":'3d'})
+        for ax in psi_ax.flatten():
+            ax.set_box_aspect([1,1,1])
+        return psi_fig, psi_ax, energies_fig, energies_ax
 
 @partial(jit, static_argnums=(1,))
 def uniform_sliding_average(data, window):
@@ -152,18 +167,31 @@ def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimens
     checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir), (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
     np.save('{}/loss'.format(save_dir), loss), np.save('{}/energies'.format(save_dir), energies)
 
-    if n_space_dimension != 3:
-        if n_space_dimension == 1:
-            psi_ax.cla()
+    # if n_space_dimension != 3:
+    if n_space_dimension == 1:
+        psi_ax.cla()
+    if n_space_dimension == 3:
+        coordinates = jax.random.uniform(key, (n_plotting, 3), minval=-10, maxval=10)
+        out = model(weight_dict, (coordinates, L_inv))
+        cs = ((out / jnp.max(jnp.abs(out))) + 1)/2
+        print(jnp.max(cs), jnp.min(cs), cs.shape)
+        xs, ys, zs = coordinates.T
+        for i in range(n_eigenfuncs):
+            ax = psi_ax.flatten()[i]
+            ax.cla()
+            ax.scatter(xs, ys, zs, s=1, c=cs, cmap='RdBu')
+            ax.set_title('Eigenfunction {}'.format(i))
+    else:
         for i in range(n_eigenfuncs):
             if n_space_dimension == 2:
                 ax = psi_ax.flatten()[i]
             else:
                 ax = psi_ax
             plot_output(model, weight_dict, D_min, D_max, psi_fig, ax, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension, N=n_plotting)
-        eigenfunc_dir = f'{save_dir}/eigenfunctions'
-        Path(eigenfunc_dir).mkdir(parents=True, exist_ok=True)
-        psi_fig.savefig(f'{eigenfunc_dir}/epoch_{epoch}.png')
+    
+    eigenfunc_dir = f'{save_dir}/eigenfunctions'
+    Path(eigenfunc_dir).mkdir(parents=True, exist_ok=True)
+    psi_fig.savefig(f'{eigenfunc_dir}/epoch_{epoch}.png')
     
     if epoch > 1:
         energies_array = jnp.array(energies)

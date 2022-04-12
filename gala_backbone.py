@@ -15,15 +15,13 @@ from jax.nn import initializers
 from jax import dtypes
 import matplotlib.pyplot as plt
 
-import os
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.6'
-
 import numpy as np
 import jax
 import jax.numpy as jnp
 from jax.experimental.stax import serial, Dense
 from geometric_algebra_attention.jax import VectorAttention
-
+import os
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.77'
 # rank = 3
 # n_dim = 32
 # dilation = 2.0
@@ -45,7 +43,7 @@ def make_gala_net(
     dilation=2.0,
     merge_fun='concat',
     join_fun='concat',
-    n_blocks=1,
+    n_blocks=2,
     block_nonlinearity=True,
     residual=True,
     invar_mode='full',
@@ -174,6 +172,10 @@ def make_gala_net(
         return last
     
     def eval_from_pos(params, rs, rng=None):
+        if type(rs) == tuple:
+            rs, L_inv = rs
+        else:
+            L_inv = None
         if len(rs.shape) == 2:
             B = rs.shape[0]
             my_rs = rs.reshape((B, -1, 3))
@@ -186,7 +188,6 @@ def make_gala_net(
             
             x = [(my_rs, vs), (coordinate_rs, coordinate_vs)]
 
-            return eval_(params, x, rng)
         elif len(rs.shape) == 1:
             my_rs = rs.reshape((-1, 3))
             n_elecs = my_rs.shape[0]
@@ -197,7 +198,11 @@ def make_gala_net(
             
             x = [(my_rs, vs), (coordinate_rs, coordinate_vs)]
 
-            return eval_(params, x, rng)
+        out = eval_(params, x, rng)
+
+        if L_inv is not None:
+            out = jnp.einsum('ij, bj -> bi', L_inv, out)
+        return out
         # elif len(rs.shape) == 2:
         #     vs = jnp.array([[1, 0, 0, 0]], dtype=jnp.float32)
         #     coordinate_rs = jnp.eye(3)

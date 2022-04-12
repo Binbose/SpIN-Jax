@@ -20,7 +20,7 @@ from functools import partial
 from jax import custom_jvp, custom_vjp
 
 import os
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.87'
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.77'
 import matplotlib.pyplot as plt
 
 debug = False
@@ -30,7 +30,7 @@ if debug:
 #config.update("jax_enable_x64", True)
 # config.update('jax_platform_name', 'cpu')
 # jax.disable_jit()
-config.update("jax_debug_nans", True)
+# config.update("jax_debug_nans", True)
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
     init, model = make_gala_net(n_eigenfuncs, D_min, D_max)
@@ -114,7 +114,7 @@ class ModelTrainer:
 
         # Turn on/off real time plotting
         self.realtime_plots = True
-        self.n_plotting = 200
+        self.n_plotting = 3000
         self.log_every = 2000
         self.window = 1000
 
