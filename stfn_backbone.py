@@ -37,7 +37,7 @@ class STFN_Net(nn.Module):
         #x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
 
         use_bias=True
-        activation = jax.nn.sigmoid #jax.nn.softplus
+        activation = jax.nn.softplus # softplus works better than signoid
         initilization = initializers.lecun_normal
 
         x_norm = jnp.linalg.norm(x,axis=-1)[...,jnp.newaxis]
@@ -45,10 +45,10 @@ class STFN_Net(nn.Module):
 
         angles = vmap(get_angles)(normalized_x)
         angles = jnp.tile(angles,(1,self.n_eigenfuncs))#.reshape(-1,self.n_eigenfuncs,3)
-        n_coeff = 5
+        n_coeff = 4
         angles_coeff = nn.Dense(self.n_eigenfuncs*n_coeff, use_bias=False, kernel_init=initilization())(jnp.ones([batch_size,1]))
         angles = angles.reshape([-1,2])
-        angles_coeff = angles_coeff.reshape([-1,n_coeff])*0.5  # *0.5 : Reduce learning rate implicitly
+        angles_coeff = angles_coeff.reshape([-1,n_coeff])*10  #best: *0.02 or *10 make it bilevel opt
         
         f_t = vmap(get_spherical)(angles,angles_coeff).reshape(-1,self.n_eigenfuncs)
 
@@ -102,12 +102,19 @@ def get_angles(xyz):
     xy = xyz[0]**2 + xyz[1]**2
     ptsnew = jnp.array([jnp.arctan2(jnp.sqrt(xy), xyz[2]),jnp.arctan2(xyz[1], xyz[0])])
     return ptsnew
-
+"""
 def get_spherical(angle,coeff):
     phi, theta = angle
     c0,c1,c2,c3,shift = coeff
     r = jnp.sin(phi)
     return c0+c1*r*jnp.cos(theta+shift)+c2*r*jnp.cos(theta)+c3*jnp.cos(phi)
+"""
+
+def get_spherical(angle,coeff):
+    phi, theta = angle
+    c0,c1,c2,c3 = coeff
+    r = jnp.sin(phi)
+    return c0+c1*r*jnp.sin(theta)+c2*r*jnp.cos(theta)+c3*jnp.cos(phi)
 
 ONE_VECTOR = jnp.array([1.0,0.0,0.0])
 

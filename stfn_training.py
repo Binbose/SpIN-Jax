@@ -1,3 +1,4 @@
+import sys
 import jax
 import jax.numpy as jnp                # JAX NumPy
 from jax import grad, jacfwd, jacrev
@@ -114,36 +115,36 @@ class ModelTrainer:
 
         # Network parameter
         self.sparsifying_K = 5
-        self.n_dense_neurons = [128, 128, 128, 128]
+        self.n_dense_neurons = [64, 128, 128, 64]
         self.n_eigenfuncs = 5
 
         # Turn on/off real time plotting
         self.realtime_plots = True
         self.n_plotting = 200
         self.log_every = 10000
-        self.window = 2000
+        self.window = 5000
 
         # Optimizer
-        self.learning_rate = 1e-5
+        self.learning_rate = 5e-5 # best: 5e-5
         self.decay_rate = 0.999
-        self.moving_average_beta = 0.05
+        self.moving_average_beta = 0.01
 
         # Train setup
-        self.num_epochs = 500000
-        self.batch_size = 512
+        self.num_epochs = 300000
+        self.batch_size = 1024
         # self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
         # self.save_dir = './results/{}_{}d_K5_4layer_5e5_05_256'.format(self.system, self.n_space_dimension)
         self.save_dir = './results/{}_{}_stfn'.format(self.system, self.n_space_dimension)
 
         # Simulation size
-        self.D_min = -15 #-50
-        self.D_max = 15 #50
+        self.D_min = -15 #good: -15
+        self.D_max = 15 #good: 15
 
     def start_training(self, show_progress=True, callback=None):
         """
         Function for training the model
         """
-        rng = jax.random.PRNGKey(3)
+        rng = jax.random.PRNGKey(5)
         rng, init_rng = jax.random.split(rng)
         # Create initial state
         model, weight_dict, opt, opt_state = create_train_state(self.n_dense_neurons, self.n_eigenfuncs, self.batch_size, self.D_min, self.D_max, self.learning_rate, self.decay_rate, self.sparsifying_K, n_space_dimension=self.n_space_dimension, init_rng=init_rng)
@@ -214,7 +215,12 @@ class ModelTrainer:
 
 if __name__ == "__main__":
     trainer = ModelTrainer()
-    trainer.start_training()
+    if len(sys.argv)>1:
+        trainer.save_dir += sys.argv[1]
+        show_progress = sys.argv[-1] != "m"
+        trainer.start_training(show_progress=show_progress)
+    else:
+        trainer.start_training()
 
 
 
