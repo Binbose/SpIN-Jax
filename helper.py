@@ -12,6 +12,8 @@ from jax import jacfwd
 from jax import jit
 from functools import partial
 from matplotlib.ticker import StrMethodFormatter, NullFormatter
+import os
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.87'
 key = jax.random.PRNGKey(1)
 def vectorized_diagonal(m):
     return vmap(jnp.diag)(m)
@@ -171,15 +173,14 @@ def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimens
     if n_space_dimension == 1:
         psi_ax.cla()
     if n_space_dimension == 3:
-        coordinates = jax.random.uniform(key, (n_plotting, 3), minval=-10, maxval=10)
-        out = model(weight_dict, (coordinates, L_inv))
-        cs = ((out / jnp.max(jnp.abs(out))) + 1)/2
-        print(jnp.max(cs), jnp.min(cs), cs.shape)
+        coordinates = jax.random.uniform(key, (n_plotting, 3), minval=D_min, maxval=D_max)
+        cs = model(weight_dict, coordinates, L_inv=L_inv)
+        
         xs, ys, zs = coordinates.T
         for i in range(n_eigenfuncs):
             ax = psi_ax.flatten()[i]
             ax.cla()
-            ax.scatter(xs, ys, zs, s=1, c=cs, cmap='RdBu')
+            ax.scatter(xs, ys, zs, s=1, c=cs[:,i], cmap='RdBu')
             ax.set_title('Eigenfunction {}'.format(i))
     else:
         for i in range(n_eigenfuncs):

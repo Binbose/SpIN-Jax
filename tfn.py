@@ -143,11 +143,9 @@ def rotation_matrix(axis, theta):
 # Layers for 3D rotation-equivariant network.
 
 class R(nn.Module):
-    nonlin: Callable = nn.relu
+    nonlin: Callable = nn.softplus
     hidden_dim: Optional[int] = None
     output_dim: int = 1
-    weights_initializer: Callable = nn.initializers.glorot_uniform()
-    biases_initializer: Callable = nn.initializers.zeros
 
     @nn.compact
     def __call__(self, inputs):
@@ -155,9 +153,9 @@ class R(nn.Module):
         if self.hidden_dim is None:
             hidden_dim = input_dim
         
-        x = nn.Dense(hidden_dim, kernel_init=self.weights_initializer)(inputs)
+        x = nn.Dense(hidden_dim)(inputs)
         x = self.nonlin(x)
-        x = nn.Dense(self.output_dim, kernel_init=self.weights_initializer)(x)
+        x = nn.Dense(self.output_dim)(x)
 
         # [N, N, output_dim]
         return x
@@ -184,26 +182,18 @@ def Y_2(rij):
     return output
 
 class F_0(nn.Module):
-    nonlin: Callable = nn.relu
-    hidden_dim: Optional[int] = None
-    output_dim: int = 1
 
     @nn.compact
     def __call__(self, inputs):
         # [N, N, output_dim, 1]
-        return jnp.expand_dims(R(nonlin=self.nonlin, hidden_dim=self.hidden_dim,
-        output_dim=self.output_dim)(inputs), axis=-1)
+        return jnp.expand_dims(R()(inputs), axis=-1)
 
 class F_1(nn.Module):
-    nonlin: Callable = nn.relu
-    hidden_dim: Optional[int] = None
-    output_dim: int = 1
 
     @nn.compact
     def __call__(self, inputs, rij):
         # [N, N, output_dim]
-        radial = R(nonlin=self.nonlin, hidden_dim=self.hidden_dim,
-        output_dim=self.output_dim)(inputs)
+        radial = R()(inputs)
 
         # Mask out for dij = 0
         dij = jnp.linalg.norm(rij, axis=-1)
@@ -214,14 +204,11 @@ class F_1(nn.Module):
         return jnp.expand_dims(unit_vectors(rij), axis=-2) * jnp.expand_dims(masked_radial, axis=-1)
 
 class F_2(nn.Module):
-    nonlin: Callable = nn.relu
-    hidden_dim: Optional[int] = None
-    output_dim: int = 1
 
     @nn.compact
     def __call__(self, inputs, rij):
          # [N, N, output_dim]
-        radial = R(nonlin=self.nonlin, hidden_dim=self.hidden_dim, output_dim=self.output_dim)(inputs)
+        radial = R()(inputs)
         # Mask out for dij = 0
         dij = jnp.linalg.norm(rij, axis=-1)
         condition = jnp.tile(jnp.expand_dims(dij < EPSILON, axis=-1), [1, 1, self.output_dim])
@@ -230,14 +217,11 @@ class F_2(nn.Module):
         return jnp.expand_dims(Y_2(rij), axis=-2) * jnp.expand_dims(masked_radial, axis=-1)
 
 class filter_0(nn.Module):
-    nonlin: Callable = nn.relu
-    hidden_dim: Optional[int] = None
-    output_dim: int = 1
 
     @nn.compact
     def __call__(self, layer_input, rbf_inputs):
          # [N, N, output_dim, 1]
-        F_0_out = F_0(nonlin=self.nonlin, hidden_dim=self.hidden_dim, output_dim=self.output_dim)(rbf_inputs)
+        F_0_out = F_0()(rbf_inputs)
         # [N, output_dim]
         input_dim = layer_input.shape[-1]
         # Expand filter axis "j"
@@ -246,16 +230,11 @@ class filter_0(nn.Module):
         return jnp.einsum('ijk,abfj,bfk->afi', cg, F_0_out, layer_input)
 
 class filter_1_output_0(nn.Module):
-    nonlin: Callable = nn.relu
-    hidden_dim: Optional[int] = None
-    output_dim: int = 1
 
     @nn.compact
     def __call__(self, layer_input, rbf_inputs, rij):
         # [N, N, output_dim, 3]
-        F_1_out = F_1(nonlin=self.nonlin,
-                      hidden_dim=self.hidden_dim,
-                      output_dim=self.output_dim)(rbf_inputs, rij)
+        F_1_out = F_1()(rbf_inputs, rij)
         # [N, output_dim, 3]
         if layer_input.shape[-1] == 1:
             raise ValueError("0 x 1 cannot yield 0")
@@ -268,16 +247,11 @@ class filter_1_output_0(nn.Module):
 
 
 class filter_1_output_1(nn.Module):
-    nonlin: Callable = nn.relu
-    hidden_dim: Optional[int] = None
-    output_dim: int = 1
 
     @nn.compact
     def __call__(self, layer_input, rbf_inputs, rij):
         # [N, N, output_dim, 3]
-        F_1_out = F_1(nonlin=self.nonlin,
-                      hidden_dim=self.hidden_dim,
-                      output_dim=self.output_dim)(rbf_inputs, rij)
+        F_1_out = F_1()(rbf_inputs, rij)
         # [N, output_dim, 3]
         if layer_input.shape[-1] == 1:
             # 0 x 1 -> 1
@@ -290,16 +264,11 @@ class filter_1_output_1(nn.Module):
             raise NotImplementedError("Other Ls not implemented")
 
 class filter_2_output_2(nn.Module):
-    nonlin: Callable = nn.relu
-    hidden_dim: Optional[int] = None
-    output_dim: int = 1
 
     @nn.compact
     def __call__(self, layer_input, rbf_inputs, rij):
         # [N, N, output_dim, 3]
-        F_2_out = F_2(nonlin=self.nonlin,
-                      hidden_dim=self.hidden_dim,
-                      output_dim=self.output_dim)(rbf_inputs, rij)
+        F_2_out = F_2()(rbf_inputs, rij)
         # [N, output_dim, 5]
         if layer_input.shape[-1] == 1:
             # 0 x 2 -> 2
@@ -308,25 +277,25 @@ class filter_2_output_2(nn.Module):
         else:
             raise NotImplementedError("Other Ls not implemented")
 
-class self_interaction_layer(nn.Module):
-    output_dim: int
-    use_bias: bool
-    weights_initializer: Callable = nn.initializers.orthogonal()
-    biases_initializer: Callable = nn.initializers.zeros
+# class self_interaction_layer(nn.Module):
+#     output_dim: int
+#     use_bias: bool
+#     weights_initializer: Callable = nn.initializers.orthogonal()
+#     biases_initializer: Callable = nn.initializers.zeros
 
-    @nn.compact
-    def __call__(self, inputs):
-        # input has shape [N, C, 2L+1]
-        # input_dim is number of channels
-        input_dim = inputs.shape[-2]
-        w_si = self.param('weights', self.weights_initializer, (self.output_dim, input_dim))
+#     @nn.compact
+#     def __call__(self, inputs):
+#         # input has shape [N, C, 2L+1]
+#         # input_dim is number of channels
+#         input_dim = inputs.shape[-2]
+#         w_si = self.param('weights', self.weights_initializer, (self.output_dim, input_dim))
 
-        if self.use_bias:
-            b_si = self.param('biases', self.biases_initializer, (self.output_dim,))
-            return jnp.transpose(jnp.einsum('afi,gf->aig', inputs, w_si) + b_si, axes=[0, 2, 1])
-        else:
-            return jnp.transpose(jnp.einsum('afi,gf->aig', inputs, w_si), axes=[0, 2, 1])
-        # [N, output_dim, 2l+1]
+#         if self.use_bias:
+#             b_si = self.param('biases', self.biases_initializer, (self.output_dim,))
+#             return jnp.transpose(jnp.einsum('afi,gf->aig', inputs, w_si) + b_si, axes=[0, 2, 1])
+#         else:
+#             return jnp.transpose(jnp.einsum('afi,gf->aig', inputs, w_si), axes=[0, 2, 1])
+#         # [N, output_dim, 2l+1]
 
 class convolution(nn.Module):
 
@@ -362,15 +331,15 @@ class self_interaction(nn.Module):
         for key in input_tensor_list:
             for i, tensor in enumerate(input_tensor_list[key]):
                 if key == 0:
-                    tensor_out = self_interaction_layer(output_dim=self.output_dim, use_bias=True)(tensor)
+                    tensor_out = nn.DenseGeneral(self.features[0], use_bias=True, axis=-2)(tensor)
                 else:
-                    tensor_out = self_interaction_layer(output_dim=self.output_dim, use_bias=False)(tensor)
+                    tensor_out = nn.DenseGeneral(self.features[0], use_bias=False, axis=-2)(tensor)
                 m = 0 if tensor_out.shape[-1] == 1 else 1
                 output_tensor_list[m].append(tensor_out)
         return output_tensor_list
 
 class nonlinearity(nn.Module):
-    nonlin: Callable = nn.elu
+    nonlin: Callable = nn.softplus
 
     @nn.compact
     def __call__(self, input_tensor_list):

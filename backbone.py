@@ -28,10 +28,6 @@ class EigenNet(nn.Module):
     mask_type = 'quadratic'
     @nn.compact
     def __call__(self, x_in):
-        if type(x_in) == tuple:
-            x_in, L_inv = x_in
-        else:
-            L_inv = None
         x = x_in
         #x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
 
@@ -78,9 +74,7 @@ class EigenNet(nn.Module):
             normalization = 1 / (jnp.sqrt(2 * jnp.pi) * sigma)
             d = normalization * jnp.exp(-0.5 * jnp.linalg.norm(x_in - mean, axis=-1, keepdims=True) ** 2 / sigma ** 2)
             x = x * d
-
-        if L_inv is not None:
-            x = jnp.einsum('ij, bj -> bi', L_inv, x)
+        
         return x
 
 
