@@ -90,8 +90,7 @@ covariance.defvjp(covariance_fwd, covariance_bwd)
 
 
 def calculate_masked_gradient(model_fn, h_fn, sigma_jac_fn, pi_jac_fn, weight_dict, batch, batch_weights, sigma_t_bar, sigma_jac_bar, moving_average_beta):
-    pred = model_fn(weight_dict, batch) #* jnp.sqrt(batch_weights)
-    print('pred ', pred)
+    pred = model_fn(weight_dict, batch) * batch_weights
     h = h_fn(weight_dict, batch) * batch_weights
 
 
@@ -258,14 +257,14 @@ class ModelTrainer:
             #     batch = jnp.array([[.3, .2], [.3, .4], [.9, .3]])
             # else:
             rng, subkey = jax.random.split(rng)
-            if len(densities) == 0:# or epoch < self.log_every * 2:
+            if len(densities) == 0 or epoch < self.log_every * 2:
                 batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
                 batch_weights = jnp.ones((self.batch_size, 1))
             else:
 
                 # batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max,
                 #                            shape=(self.batch_size, self.n_space_dimension))
-                batch_size_per_density = self.batch_size // self.n_eigenfuncs#(self.n_eigenfuncs + 1)
+                batch_size_per_density = self.batch_size // (self.n_eigenfuncs + 1)
                 batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(batch_size_per_density, self.n_space_dimension))
                 batch_weights = jnp.ones((batch_size_per_density, 1))
 
