@@ -95,6 +95,8 @@ def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=
 
         ax.plot(x,z)
 
+        return(x, z)
+
     elif n_space_dimension == 2:
         # generate 2 2d grids for the x & y bounds
         y, x = np.meshgrid(np.linspace(D_min, D_max, N), np.linspace(D_min, D_max, N))
@@ -112,6 +114,8 @@ def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=
         ax.set_title('Eigenfunction {}'.format(n_eigenfunc))
         # set the limits of the plot to the limits of the data
         ax.axis([x.min(), x.max(), y.min(), y.max()])
+
+        return (jnp.array(x), jnp.array(y), z)
 
 
 def create_plots(n_space_dimension, neig):
@@ -138,17 +142,19 @@ def uniform_sliding_stdev(data, window):
     return np.std(rolling, 1)
 
 def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimension, opt_state, epoch, sigma_t_bar, j_sigma_t_bar, loss, energies, n_eigenfuncs, charge, system, L_inv, window, n_plotting, psi_fig, psi_ax, energies_fig, energies_ax):
-    checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir), (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
-    np.save('{}/loss'.format(save_dir), loss), np.save('{}/energies'.format(save_dir), energies)
+    #checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir), (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
+    #np.save('{}/loss'.format(save_dir), loss), np.save('{}/energies'.format(save_dir), energies)
 
     if n_space_dimension == 1:
         psi_ax.cla()
+
+    densities = []
     for i in range(n_eigenfuncs):
         if n_space_dimension == 2:
             ax = psi_ax.flatten()[i]
         else:
             ax = psi_ax
-        plot_output(model, weight_dict, D_min, D_max, psi_fig, ax, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension, N=n_plotting)
+        densities.append(plot_output(model, weight_dict, D_min, D_max, psi_fig, ax, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension, N=n_plotting))
     eigenfunc_dir = f'{save_dir}/eigenfunctions'
     Path(eigenfunc_dir).mkdir(parents=True, exist_ok=True)
     psi_fig.savefig(f'{eigenfunc_dir}/epoch_{epoch}.png')
@@ -194,3 +200,35 @@ def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimens
 
         np.save('{}/loss'.format(save_dir), loss)
         np.save('{}/energies'.format(save_dir), energies)
+
+    return densities
+
+
+#@partial(jit, static_argnums=(3,5,6))
+def sample_density(model_fn, weight_dict, x, y, density, batch_size, rng_key, D_min, D_max):
+    n_discretizatino = x.shape[0]
+
+    x = x.reshape(-1)
+    y = y.reshape(-1)
+
+    d = (density.reshape(-1))**2
+    p = d/d.sum()
+    p += 1e-9
+    p = d / d.sum()
+
+
+    idx = jnp.array(jax.random.choice(rng_key, jnp.arange(x.shape[0]), shape=(batch_size,), p=p))
+
+    batch = jnp.concatenate([x[idx][:, None], y[idx][:, None]], axis=-1)
+
+    #batch_noise = jax.random.uniform(rng_key, minval=D_min/n_discretizatino, maxval=D_max/n_discretizatino, shape=batch.shape)
+
+    # batch = batch + batch_noise
+
+    batch_weight = 1 / (d[idx][:, None])
+    # batch_weight = batch_weight / batch_weight.mean()
+    # batch_weight = 1/(p[idx][:, None] * x.shape[0])
+
+    return batch, jax.lax.stop_gradient(batch_weight)
+
+

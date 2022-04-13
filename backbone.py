@@ -33,7 +33,7 @@ class EigenNet(nn.Module):
         else:
             L_inv = None
         x = x_in
-        x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
+        #x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
 
         '''
         activation = jax.nn.sigmoid
