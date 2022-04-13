@@ -32,10 +32,7 @@ class STFN_Net(nn.Module):
         else:
             L_inv = None
 
-        batch_size = x_in.shape[0]
         x = x_in
-        #x = (x - (self.D_max + self.D_min) / 2) / jnp.max(jnp.array([self.D_max, self.D_min]))
-
         use_bias=True
         activation = jax.nn.softplus # softplus works better than signoid
         initilization = initializers.lecun_normal
@@ -43,35 +40,24 @@ class STFN_Net(nn.Module):
         x_norm = jnp.linalg.norm(x,axis=-1)[...,jnp.newaxis]
         normalized_x= x_in / x_norm
 
-        angles = vmap(get_angles)(normalized_x)
-        angles = jnp.tile(angles,(1,self.n_eigenfuncs))#.reshape(-1,self.n_eigenfuncs,3)
+        coeff = nn.Dense(self.n_neuron[0], use_bias=use_bias, kernel_init=initilization())(x_norm)
+        coeff = activation(coeff)
+
+        for i, feat in enumerate(self.n_neuron[1:]):
+            coeff = nn.Dense(feat, use_bias=use_bias, kernel_init=initilization())(coeff)
+            coeff = activation(coeff)
+
         n_coeff = 4
-        angles_coeff = nn.Dense(self.n_eigenfuncs*n_coeff, use_bias=False, kernel_init=initilization())(jnp.ones([batch_size,1]))
-        angles = angles.reshape([-1,2])
-        angles_coeff = angles_coeff.reshape([-1,n_coeff])*10  #best: *0.02 or *10 make it bilevel opt
+        coeff = nn.Dense(self.n_eigenfuncs*n_coeff, use_bias=use_bias, kernel_init=initilization())(coeff)
+        coeff = coeff.reshape([-1,n_coeff]) #best: *0.02 or *10 make it bilevel opt
+
+        tiled_x = jnp.tile(normalized_x,(1,self.n_eigenfuncs))
+        tiled_x = tiled_x.reshape([-1,3])
+        f = tiled_x*coeff[...,1:]
         
-        f_t = vmap(get_spherical)(angles,angles_coeff).reshape(-1,self.n_eigenfuncs)
-
+        f = jnp.sum((f),axis=-1).reshape([-1,self.n_eigenfuncs])
+        f = f + coeff[...,0].reshape([-1,self.n_eigenfuncs])
         
-        f_r = nn.Dense(self.n_neuron[0], use_bias=use_bias, kernel_init=initilization())(x_norm)
-        f_r = activation(f_r)
-
-        for i, feat in enumerate(self.n_neuron[1:-1]):
-            f_r = nn.Dense(feat, use_bias=use_bias, kernel_init=initilization())(f_r)
-            f_r = activation(f_r)
-
-        f_r = nn.Dense(self.n_eigenfuncs, use_bias=use_bias, kernel_init=initilization())(f_r)
-        #f_r = f_r.reshape([-1,self.n_eigenfuncs])
-
-        #exp_decay = nn.Dense(self.n_eigenfuncs, use_bias=False, kernel_init=initilization())(jnp.ones([batch_size,1]))
-        #exp_decay = jax.nn.relu(exp_decay)*0.2
-        #print(exp_decay)
-        #print(x_norm)
-        #print(exp_decay*x_norm)
-        #exp_decay = jnp.exp(-exp_decay*x_norm*0.2)  # *0.1 : Reduce learning rate implicitly
-        #f_r = f_r * exp_decay
-
-        f = f_t*f_r
 
         if self.mask_type == 'quadratic':
             # We multiply the output by \prod_i (\sqrt{2D^2-x_i^2}-D) to apply a boundary condition \psi(D_max) = 0 and \psi(D_min) = 0
@@ -109,6 +95,9 @@ def get_spherical(angle,coeff):
     r = jnp.sin(phi)
     return c0+c1*r*jnp.cos(theta+shift)+c2*r*jnp.cos(theta)+c3*jnp.cos(phi)
 """
+def get_output(x,coeff):
+    c0,c1,c2,c3 = coeff
+    return c0+c1*x[0]+c2*x[1]+c3*x[2]
 
 def get_spherical(angle,coeff):
     phi, theta = angle
