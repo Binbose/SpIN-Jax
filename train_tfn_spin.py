@@ -1,8 +1,7 @@
 import jax
 import jax.numpy as jnp                # JAX NumPy
-from jax import grad, jacfwd, jacrev
 from jax.config import config
-# config.update('jax_platform_name', 'cpu')
+config.update('jax_platform_name', 'cpu')
 # config.update("jax_debug_nans", True)
 
 import numpy as np                     # Ordinary NumPy
@@ -42,19 +41,20 @@ system = 'hydrogen'
 n_space_dimension = 3
 n_electrons = 1
 charge = 1
-n_dense_neurons = [128]
+n_dense_neurons = [4, 4]
 n_eigenfuncs = 5
 
 D_min = -20
 D_max = 20
 
-rbf_low = 0.0
-rbf_high = D_max
-rbf_count = 20
+# rbf_low = 0.0
+# rbf_high = D_max  / 2
+# rbf_count = 8
+radial_channels = [4, 4]
 
-learning_rate = 1e-5
+learning_rate = 1e-6
 decay_rate = .999
-moving_average_beta = 0.01
+moving_average_beta = 0.05
 num_epochs = 300000
 batch_size = 256
 
@@ -62,12 +62,13 @@ realtime_plots = True
 n_plotting = 3000
 log_every = 2000
 window = 1000
-save_dir = './results/{}_{}d_tfn'.format(system, n_space_dimension)
+save_dir = './results/{}_{}d_tfn_new'.format(system, n_space_dimension)
 
 
 def create_TFN_train_state(init_rng=jax.random.PRNGKey(1)):
-    model = TFNEigenNet(features=n_dense_neurons + [n_eigenfuncs], D_min=D_min, D_max=D_max, rbf_low=rbf_low,
-    rbf_high=rbf_high, rbf_count=rbf_count)
+    model = TFNEigenNet(features=n_dense_neurons + [n_eigenfuncs], D_min=D_min, D_max=D_max,
+    # rbf_low=rbf_low, rbf_high=rbf_high, rbf_count=rbf_count)
+    radial_channels=radial_channels)
     batch = jnp.ones((n_electrons, n_space_dimension))
     weight_dict = model.init(init_rng, batch)
 
@@ -117,7 +118,7 @@ def covariance_bwd(res, g):
 
 covariance.defvjp(covariance_fwd, covariance_bwd)
 
-@partial(jit, static_argnums=(0,1,3,5))
+# @partial(jit, static_argnums=(0,1,3,5))
 def train_step(model_apply_jitted, h_fn, weight_dict, opt_update, opt_state, optax_apply_updates, batch, sigma_t_bar, j_sigma_t_bar):
     def u_from_theta(theta):
         return model_apply_jitted(theta, batch)

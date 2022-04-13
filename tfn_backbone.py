@@ -21,7 +21,10 @@ class TFNEigenNet(nn.Module):
     features: Sequence[int]
     D_min: float  # Dimension of the [-D,D]^2 box where we sample input x_in.
     D_max: float
-    radial_channels: Sequence[int] = (32, 32, 32)
+    # rbf_low: float
+    # rbf_high: float
+    # rbf_count: int
+    radial_channels: Sequence[int]
 
     @nn.compact
     def __call__(self, x_in):
@@ -39,6 +42,11 @@ class TFNEigenNet(nn.Module):
 
         N = dij.shape[0]
 
+        # rbf_spacing = (self.rbf_high - self.rbf_low) / self.rbf_count
+        # centers = jnp.linspace(self.rbf_low, self.rbf_high, self.rbf_count)
+        # gamma = 1. / rbf_spacing
+        # rbf = jnp.exp(-gamma * jnp.square(jnp.expand_dims(dij, axis=-1) - centers))
+        # radial = rbf
         radial = dij.reshape(-1, 1) # (N^2, 1)
 
         for chan in self.radial_channels:
@@ -47,10 +55,12 @@ class TFNEigenNet(nn.Module):
             radial = nn.softplus(radial)
         
         radial = radial.reshape(N, N, -1)
+
         # embed : [N, layer1_dim, 1]
         ones = jnp.ones((N, 1, 1)) # B, channels, 2L+1
-        embed = nn.DenseGeneral(self.features[0], use_bias=False, axis=-2)(ones)
-        # embed = tfn.self_interaction_layer(self.features[0], use_bias=False)()
+        # embed = nn.DenseGeneral(self.features[0], use_bias=False, axis=-2)(ones)
+        embed = nn.DenseGeneral(self.features[0], use_bias=False, axis=-2)(ones).swapaxes(-1,-2)
+        # embed = tfn.self_interaction_layer(self.features[0], use_bias=False)(ones)
 
         input_tensor_list = {0: [embed]}
 
