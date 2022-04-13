@@ -1,3 +1,4 @@
+import types
 import jax
 import jax.numpy as jnp                # JAX NumPy
 
@@ -12,6 +13,12 @@ from jax import jacfwd
 from jax import jit
 from functools import partial
 from matplotlib.ticker import StrMethodFormatter, NullFormatter
+
+from equipotential_plot import draw_equal_potential, get_eval_points
+
+import os
+os.environ['XLA_FLAGS'] = '--xla_gpu_strict_conv_algorithm_picker=false'
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '.87'
 
 def vectorized_diagonal(m):
     return vmap(jnp.diag)(m)
@@ -89,13 +96,13 @@ def get_exact_eigenvalues(system, n_eigenfuncs, n_space_dimension, D_min, D_max,
                     tmp.append(n)
             quantum_nos = np.array(tmp)[:n_eigenfuncs]
             ground_truth = -charge**2 / (2*(quantum_nos)**2)
-            ground_truth /= 2.0 # convert back to units in the paper
             return ground_truth
 
 
-def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100):
-    ax.cla()
+def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=None, n_space_dimension=2, N=100, save_dir=None,epoch=-1):
+    
     if n_space_dimension == 1:
+        ax.cla()
         x = np.linspace(D_min,D_max, N)[:,None]
         if L_inv is not None:
             z = model.apply(weight_dict, (x, L_inv))[:, n_eigenfunc]
@@ -107,6 +114,7 @@ def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=
         ax.plot(x,z)
 
     elif n_space_dimension == 2:
+        ax.cla()
         # generate 2 2d grids for the x & y bounds
         y, x = np.meshgrid(np.linspace(D_min, D_max, N), np.linspace(D_min, D_max, N))
         coordinates = np.stack([x, y], axis=-1).reshape(-1, 2)
@@ -124,6 +132,28 @@ def plot_output(model, weight_dict, D_min, D_max, fig, ax, n_eigenfunc=0, L_inv=
         # set the limits of the plot to the limits of the data
         ax.axis([x.min(), x.max(), y.min(), y.max()])
 
+    elif n_space_dimension == 3:
+        N_grid = 30
+        D_min = -15
+        D_max = 15
+        coord, output_shape = get_eval_points(n_electron=1, N_grid=N_grid, D_min = D_min, D_max = D_max)
+        if isinstance(model, types.FunctionType):
+            phis = model(weight_dict, coord)
+        else:
+            phis = model.apply(weight_dict, coord)
+        if L_inv is not None:
+            phis = jnp.einsum('ij, bj -> bi', L_inv, phis)
+
+        for i in range(n_eigenfunc):
+            ax[i].cla()
+            phi = phis[:, i]
+            phi = phi.reshape(*output_shape)
+            phi = phi**2
+            draw_equal_potential(np.array(phi), ax[i], D_min, D_max, potential_level_factor = 1.0)
+
+        np.save(save_dir+f"/eigenfunctions/{epoch}",np.array(phis))
+
+
 
 def create_plots(n_space_dimension, neig):
     energies_fig, energies_ax = plt.subplots(1, 1, figsize=(10, 6))
@@ -139,7 +169,11 @@ def create_plots(n_space_dimension, neig):
             ax.set_aspect('equal', adjustable='box')
         return psi_fig, psi_ax, energies_fig, energies_ax
     elif n_space_dimension == 3:
-        return None, None, energies_fig, energies_ax
+        #nfig = max(2, int(np.ceil(np.sqrt(neig))))
+        psi_fig, psi_ax = plt.subplots(int(np.ceil(neig/3)), 3, figsize=(10, 10), subplot_kw={"projection":'3d'})
+        for ax in psi_ax.flatten():
+            ax.set_aspect('auto', adjustable='box')
+        return psi_fig, psi_ax, energies_fig, energies_ax
 
 @partial(jit, static_argnums=(1,))
 def uniform_sliding_average(data, window):
@@ -152,17 +186,24 @@ def create_checkpoint(save_dir, model, weight_dict, D_min, D_max, n_space_dimens
     checkpoints.save_checkpoint('{}/checkpoints'.format(save_dir), (weight_dict, opt_state, epoch, sigma_t_bar, j_sigma_t_bar), epoch, keep=2)
     np.save('{}/loss'.format(save_dir), loss), np.save('{}/energies'.format(save_dir), energies)
 
-    if n_space_dimension != 3:
+
+    eigenfunc_dir = f'{save_dir}/eigenfunctions'
+    Path(eigenfunc_dir).mkdir(parents=True, exist_ok=True)
+
+    if True:
         if n_space_dimension == 1:
             psi_ax.cla()
-        for i in range(n_eigenfuncs):
-            if n_space_dimension == 2:
-                ax = psi_ax.flatten()[i]
-            else:
-                ax = psi_ax
-            plot_output(model, weight_dict, D_min, D_max, psi_fig, ax, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension, N=n_plotting)
-        eigenfunc_dir = f'{save_dir}/eigenfunctions'
-        Path(eigenfunc_dir).mkdir(parents=True, exist_ok=True)
+        if n_space_dimension == 3:
+            ax = psi_ax.flatten()
+            plot_output(model, weight_dict, D_min, D_max, psi_fig, ax, L_inv=L_inv, n_eigenfunc=n_eigenfuncs, n_space_dimension=n_space_dimension, N=n_plotting, save_dir=save_dir, epoch=epoch)
+        if n_space_dimension != 3:
+            for i in range(n_eigenfuncs):
+                if n_space_dimension == 2:
+                    ax = psi_ax.flatten()[i]
+                else:
+                    ax = psi_ax
+                plot_output(model, weight_dict, D_min, D_max, psi_fig, ax, L_inv=L_inv, n_eigenfunc=i, n_space_dimension=n_space_dimension, N=n_plotting)
+
         psi_fig.savefig(f'{eigenfunc_dir}/epoch_{epoch}.png')
     
     if epoch > 1:

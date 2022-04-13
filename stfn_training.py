@@ -6,7 +6,6 @@ import numpy as np                     # Ordinary NumPy
 import optax                           # Optimizers
 
 import helper
-from backbone import EigenNet
 from physics import construct_hamiltonian_function
 from helper import moving_average
 from flax.core import FrozenDict
@@ -22,6 +21,8 @@ from jax import custom_jvp, custom_vjp
 
 import matplotlib.pyplot as plt
 
+from stfn_backbone import STFN_Net
+
 debug = False
 # debug = True
 if debug:
@@ -32,14 +33,13 @@ if debug:
 # config.update("jax_debug_nans", True)
 
 def create_train_state(n_dense_neurons, n_eigenfuncs, batch_size, D_min, D_max, learning_rate, decay_rate, sparsifying_K, n_space_dimension=2, init_rng=0):
-    model = EigenNet(features=n_dense_neurons + [n_eigenfuncs], D_min=D_min, D_max=D_max)
+    model = STFN_Net(n_neuron=n_dense_neurons,n_eigenfuncs=n_eigenfuncs, D_min=D_min, D_max=D_max)
     batch = jnp.ones((batch_size, n_space_dimension))
     weight_dict = model.init(init_rng, batch)
-    layer_sparsifying_masks = EigenNet.get_all_layer_sparsifying_masks(weight_dict, sparsifying_K)
 
     opt = optax.rmsprop(learning_rate, decay_rate)
     opt_state = opt.init(weight_dict)
-    return model, weight_dict, opt, opt_state, layer_sparsifying_masks
+    return model, weight_dict, opt, opt_state
 
 @custom_vjp
 def covariance(u1, u2):
@@ -54,8 +54,8 @@ def covariance_bwd(res, g):
 
 covariance.defvjp(covariance_fwd, covariance_bwd)
 
-@partial(jit, static_argnums=(0,1,3,5))
-def train_step(model_apply_jitted, h_fn, weight_dict, opt_update, opt_state, optax_apply_updates, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta):
+@partial(jit, static_argnums=(0,1,3,5,9))
+def train_step(model_apply_jitted, h_fn, weight_dict, opt_update, opt_state, optax_apply_updates, batch, sigma_t_bar, j_sigma_t_bar, moving_average_beta, epoch):
     def u_from_theta(theta):
         return model_apply_jitted(theta, batch)
 
@@ -67,15 +67,17 @@ def train_step(model_apply_jitted, h_fn, weight_dict, opt_update, opt_state, opt
         u = u_from_theta(theta)
         h_u = h_fn(theta, batch, u)
         return covariance(u, h_u), h_u
-    
+
+    #augmented_beta = 1/(epoch*0.0001)*0.1+moving_average_beta#0.1*jnp.exp(-epoch*0.00001)+moving_average_beta
+    augmented_beta = moving_average_beta
     j_sigma_t_hat, u = jax.jacrev(sigma_from_theta, has_aux=True)(weight_dict)
     j_sigma_t_bar = jax.tree_multimap(
-        lambda x, y: moving_average(x, y, moving_average_beta),
+        lambda x, y: moving_average(x, y, augmented_beta),
         j_sigma_t_bar, j_sigma_t_hat
     )
 
     sigma = covariance(u, u)
-    sigma_t_bar = moving_average(sigma_t_bar, sigma, moving_average_beta)
+    sigma_t_bar = moving_average(sigma_t_bar, sigma, augmented_beta)
 
     L = jnp.linalg.cholesky(sigma_t_bar)
     L_inv = jnp.linalg.inv(L)
@@ -118,7 +120,7 @@ class ModelTrainer:
         # Turn on/off real time plotting
         self.realtime_plots = True
         self.n_plotting = 200
-        self.log_every = 5000
+        self.log_every = 10000
         self.window = 2000
 
         # Optimizer
@@ -131,20 +133,20 @@ class ModelTrainer:
         self.batch_size = 512
         # self.save_dir = './results/{}_{}d'.format(self.system, self.n_space_dimension)
         # self.save_dir = './results/{}_{}d_K5_4layer_5e5_05_256'.format(self.system, self.n_space_dimension)
-        self.save_dir = './results/{}_{}fnn'.format(self.system, self.n_space_dimension)
+        self.save_dir = './results/{}_{}_stfn'.format(self.system, self.n_space_dimension)
 
         # Simulation size
-        self.D_min = -15
-        self.D_max = 15
+        self.D_min = -15 #-50
+        self.D_max = 15 #50
 
     def start_training(self, show_progress=True, callback=None):
         """
         Function for training the model
         """
-        rng = jax.random.PRNGKey(1)
+        rng = jax.random.PRNGKey(3)
         rng, init_rng = jax.random.split(rng)
         # Create initial state
-        model, weight_dict, opt, opt_state, layer_sparsifying_masks = create_train_state(self.n_dense_neurons, self.n_eigenfuncs, self.batch_size, self.D_min, self.D_max, self.learning_rate, self.decay_rate, self.sparsifying_K, n_space_dimension=self.n_space_dimension, init_rng=init_rng)
+        model, weight_dict, opt, opt_state = create_train_state(self.n_dense_neurons, self.n_eigenfuncs, self.batch_size, self.D_min, self.D_max, self.learning_rate, self.decay_rate, self.sparsifying_K, n_space_dimension=self.n_space_dimension, init_rng=init_rng)
 
         # Initialize sigma_t_bar as an identity matrix
         sigma_t_bar = jnp.eye(self.n_eigenfuncs)
@@ -155,7 +157,7 @@ class ModelTrainer:
 
 
         model_apply_jitted = jit(lambda params, inputs: model.apply(params, inputs))
-        h_fn = jit(construct_hamiltonian_function(model_apply_jitted, system=self.system, eps=0.0))
+        h_fn = jit(construct_hamiltonian_function(lambda weight_dict, x:model_apply_jitted(weight_dict, jnp.array([x]))[0], system=self.system, eps=0.0))
         opt_update_jitted = jit(lambda masked_gradient, opt_state: opt.update(masked_gradient, opt_state))
         optax_apply_updates_jitted = jit(lambda weight_dict, updates: optax.apply_updates(weight_dict, updates))
 
@@ -188,14 +190,11 @@ class ModelTrainer:
                 rng, subkey = jax.random.split(rng)
                 batch = jax.random.uniform(subkey, minval=self.D_min, maxval=self.D_max, shape=(self.batch_size, self.n_space_dimension))
 
-            # Sparsify the weights so that some of them are always 0 (to check)
-            if self.sparsifying_K > 0:
-                weight_dict = EigenNet.sparsify_weights(weight_dict, layer_sparsifying_masks)
 
             weight_dict = weight_dict.unfreeze()
 
             # Run an optimization step over a training batch
-            new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, h_fn, weight_dict, opt_update_jitted, opt_state, optax_apply_updates_jitted, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta)
+            new_loss, weight_dict, new_energies, sigma_t_bar, j_sigma_t_bar, L_inv, opt_state = train_step(model_apply_jitted, h_fn, weight_dict, opt_update_jitted, opt_state, optax_apply_updates_jitted, batch, sigma_t_bar, j_sigma_t_bar, self.moving_average_beta,epoch)
             pbar.set_description('Loss {:.3f}'.format(np.around(np.asarray(new_loss), 3).item()))
 
             loss.append(new_loss)
