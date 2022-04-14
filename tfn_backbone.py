@@ -24,7 +24,7 @@ class TFNEigenNet(nn.Module):
     # rbf_low: float
     # rbf_high: float
     # rbf_count: int
-    radial_channels: Sequence[int]
+    # radial_channels: Sequence[int]
 
     @nn.compact
     def __call__(self, x_in):
@@ -47,19 +47,21 @@ class TFNEigenNet(nn.Module):
         # gamma = 1. / rbf_spacing
         # rbf = jnp.exp(-gamma * jnp.square(jnp.expand_dims(dij, axis=-1) - centers))
         # radial = rbf
-        radial = dij.reshape(-1, 1) # (N^2, 1)
+        # radial = dij.reshape(-1, 1) # (N^2, 1)
 
-        for chan in self.radial_channels:
-        # radial : [N, N, radial_channel]
-            radial = nn.Dense(chan)(radial)
-            radial = nn.softplus(radial)
+        # for chan in self.radial_channels:
+        # # radial : [N, N, radial_channel]
+        #     radial = nn.Dense(chan)(radial)
+        #     radial = nn.softplus(radial)
         
-        radial = radial.reshape(N, N, -1)
+        # radial = radial.reshape(N, N, -1)
+        radial = dij.reshape(N, N, 1)
 
         # embed : [N, layer1_dim, 1]
         ones = jnp.ones((N, 1, 1)) # B, channels, 2L+1
         # embed = nn.DenseGeneral(self.features[0], use_bias=False, axis=-2)(ones)
         embed = nn.DenseGeneral(self.features[0], use_bias=False, axis=-2)(ones).swapaxes(-1,-2)
+        embed = nn.softplus(embed)
         # embed = tfn.self_interaction_layer(self.features[0], use_bias=False)(ones)
 
         input_tensor_list = {0: [embed]}
@@ -67,8 +69,8 @@ class TFNEigenNet(nn.Module):
         for layer, layer_dim in enumerate(self.features[1:]):
             input_tensor_list = tfn.convolution()(input_tensor_list, radial, rij)
             input_tensor_list = tfn.concatenation(input_tensor_list)
-            input_tensor_list = tfn.self_interaction(layer_dim)(input_tensor_list)
-            input_tensor_list = tfn.nonlinearity()(input_tensor_list)
+            # input_tensor_list = tfn.self_interaction(layer_dim)(input_tensor_list)
+            # input_tensor_list = tfn.nonlinearity()(input_tensor_list)
 
         # x = input_tensor_list[1][0]
         # concatenate l=0 (1 channel), l=1 (3 channels), total is 4 channels

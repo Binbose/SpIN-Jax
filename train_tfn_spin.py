@@ -41,16 +41,16 @@ system = 'hydrogen'
 n_space_dimension = 3
 n_electrons = 1
 charge = 1
-n_dense_neurons = [4, 4]
+n_dense_neurons = [64]
 n_eigenfuncs = 5
 
-D_min = -20
-D_max = 20
+D_min = -15
+D_max = 15
 
 # rbf_low = 0.0
 # rbf_high = D_max  / 2
 # rbf_count = 8
-radial_channels = [4, 4]
+# radial_channels = [
 
 learning_rate = 1e-6
 decay_rate = .999
@@ -68,7 +68,8 @@ save_dir = './results/{}_{}d_tfn_new'.format(system, n_space_dimension)
 def create_TFN_train_state(init_rng=jax.random.PRNGKey(1)):
     model = TFNEigenNet(features=n_dense_neurons + [n_eigenfuncs], D_min=D_min, D_max=D_max,
     # rbf_low=rbf_low, rbf_high=rbf_high, rbf_count=rbf_count)
-    radial_channels=radial_channels)
+    # radial_channels=radial_channels)
+    )
     batch = jnp.ones((n_electrons, n_space_dimension))
     weight_dict = model.init(init_rng, batch)
 

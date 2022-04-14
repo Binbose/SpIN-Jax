@@ -148,7 +148,7 @@ class R(nn.Module):
     @nn.compact
     def __call__(self, inputs):
         input_dim = inputs.shape[-1]
-        hidden_dim = input_dim
+        hidden_dim = 64
         
         x = nn.Dense(hidden_dim)(inputs)
         x = self.nonlin(x)
